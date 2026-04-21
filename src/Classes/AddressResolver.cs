@@ -26,7 +26,7 @@ namespace CESDK.Classes
 
             if (lua.IsNumber(-1))
             {
-                return (ulong)lua.ToInteger(-1);
+                return (ulong)lua.ToNumber(-1);
             }
             else if (lua.IsString(-1))
             {
@@ -60,7 +60,7 @@ namespace CESDK.Classes
 
             if (lua.IsNumber(-1))
             {
-                return (ulong)lua.ToInteger(-1);
+                return (ulong)lua.ToNumber(-1);
             }
             else if (lua.IsString(-1))
             {
