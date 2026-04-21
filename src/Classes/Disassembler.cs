@@ -25,9 +25,9 @@ namespace CESDK.Classes
     {
         private static readonly LuaNative lua = PluginContext.Lua;
 
-        public static string? Disassemble(ulong address, int maxSize = 512) =>
+        public static string? Disassemble(ulong address) =>
             WrapException(() => LuaUtils.CallLuaFunction("disassemble", $"disassemble at 0x{address:X}",
-                () => PluginContext.Lua.ToString(-1), address, maxSize));
+                () => PluginContext.Lua.ToString(-1), address));
 
         public static int GetInstructionSize(ulong address) =>
             WrapException(() => LuaUtils.CallLuaFunction("getInstructionSize", $"get instruction size at 0x{address:X}",
