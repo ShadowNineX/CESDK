@@ -420,6 +420,23 @@ namespace CESDK.Classes
         }
 
         /// <summary>
+        /// Deinitializes and releases the cached results FoundList, if any.
+        /// MUST be called before running another scan (especially nextScan): a
+        /// FoundList left initialized over this memscan holds pointers into the
+        /// previous result set, and scanning again frees/reallocates those
+        /// results, so CE then writes through stale pointers and crashes the
+        /// whole process. Safe to call when no results exist (no-op).
+        /// </summary>
+        public void DeinitializeResults()
+        {
+            if (_cachedFoundList != null)
+            {
+                try { _cachedFoundList.Deinitialize(); } catch { /* ignore cleanup errors */ }
+                _cachedFoundList = null;
+            }
+        }
+
+        /// <summary>
         /// Initializes the scan results for reading. Call after WaitTillDone().
         /// Creates a new independent FoundList via createFoundList() and initializes it.
         /// </summary>
