@@ -16,17 +16,19 @@ This project is currently WIP. Things might be missing.
 dotnet build
 ```
 
+## Install
+
+NuGet package: https://www.nuget.org/packages/CESDK
+
+```bash
+dotnet add package CESDK
+```
+
 ## Requirements
 
 - .NET Framework 4.8.1
 - Cheat Engine 7.0 or later
 - Windows
-
-## FAQ
-
-### Why not on Nuget?
-
-I just want to make sure the library works first as I really can't implement unit testing with a DLL since it requires Cheat Engine running at runtime.
 
 ## Contributors
 
