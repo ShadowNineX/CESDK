@@ -16,6 +16,31 @@ This project is currently WIP. Things might be missing.
 dotnet build
 ```
 
+## Testing
+
+Tests live under `tests/` and are not referenced by `CESDK.csproj`, so they do not get packed into the CESDK NuGet package.
+
+Build the SDK and test projects:
+
+```bash
+dotnet build CESDK.sln
+dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filter "TestCategory!=Live"
+```
+
+The live CESDK tests run through a dedicated Cheat Engine plugin:
+
+1. Build `tests/CESDK.LiveTestPlugin/CESDK.LiveTestPlugin.csproj`.
+2. Copy `tests/CESDK.LiveTestPlugin/bin/x64/Debug/net10.0-windows/cesdk-live-tests.dll` into Cheat Engine's plugins directory.
+3. Restart Cheat Engine and enable `CESDK Live Tests`.
+4. Run the test harness:
+
+```powershell
+$env:CESDK_LIVE = "1"
+dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filter TestCategory=Live
+```
+
+By default the plugin writes `%TEMP%\cesdk-live-tests-result.json`. Set `CESDK_LIVE_RESULT` before launching Cheat Engine and before running `dotnet test` to use a custom result path.
+
 ## Install
 
 NuGet package: https://www.nuget.org/packages/CESDK
