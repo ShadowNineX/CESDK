@@ -4,7 +4,7 @@
     <AssemblyName>CESDK</AssemblyName>
     <RootNamespace>CESDK</RootNamespace>
     <PackageId>CESDK</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>ShadowNineX</Authors>
     <Company>ShadowNineX</Company>
     <Description>Managed C# wrapper library for developing Cheat Engine plugins.</Description>
