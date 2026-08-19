@@ -73,6 +73,7 @@ public sealed class CesdkLiveTests
             [
                 "address-list-record-lifecycle",
                 "structure-manager-lifecycle",
+                "debugger-windows-reattach-lifecycle",
                 "cheat-table-save",
                 "symbol-registry-lifecycle",
                 "memory-access-read-write",
@@ -80,6 +81,7 @@ public sealed class CesdkLiveTests
                 "pointer-chains-resolve",
                 "aob-scanner-allocated-marker",
                 "memscan-bounded-marker",
+                "memscan-next-scan-foundlist-lifecycle",
                 "found-list-lifecycle",
                 "injection-script-generation",
             ]);

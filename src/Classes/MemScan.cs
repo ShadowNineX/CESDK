@@ -236,28 +236,21 @@ namespace CESDK.Classes
         }
 
         /// <summary>
-        /// Deinitializes and releases the cached results FoundList, if any.
-        /// MUST be called before running another scan (especially nextScan): a
-        /// FoundList left initialized over this memscan holds pointers into the
-        /// previous result set, and scanning again frees/reallocates those
-        /// results, so CE then writes through stale pointers and crashes the
-        /// whole process. Safe to call when no results exist (no-op).
+        /// Deinitializes the cached FoundList before another scan. The FoundList
+        /// object stays alive for the lifetime of this MemScan and is reinitialized
+        /// against the next result set. Destroying and recreating the FoundList
+        /// between firstScan and nextScan can invalidate CE's internal result
+        /// ownership and crash the host process.
         /// </summary>
         public void DeinitializeResults()
         {
-            if (_cachedFoundList == null)
-                return;
-
-            FoundList foundList = _cachedFoundList;
-            _cachedFoundList = null;
-            if (foundList.IsInitialized)
-                foundList.Deinitialize();
-            foundList.Dispose();
+            if (_cachedFoundList?.IsInitialized == true)
+                _cachedFoundList.Deinitialize();
         }
 
         /// <summary>
         /// Initializes the scan results for reading. Call after WaitTillDone().
-        /// Creates a new independent FoundList via createFoundList() and initializes it.
+        /// Reuses this MemScan's owned FoundList across first/next scans.
         /// </summary>
         public void InitializeResults()
         {
@@ -319,7 +312,14 @@ namespace CESDK.Classes
         /// <inheritdoc />
         public override void Dispose()
         {
-            DeinitializeResults();
+            FoundList? foundList = _cachedFoundList;
+            _cachedFoundList = null;
+            if (foundList != null)
+            {
+                if (foundList.IsInitialized)
+                    foundList.Deinitialize();
+                foundList.Dispose();
+            }
             base.Dispose();
         }
     }

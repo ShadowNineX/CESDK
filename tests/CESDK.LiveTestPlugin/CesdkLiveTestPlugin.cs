@@ -119,6 +119,7 @@ public sealed class CesdkLiveTestPlugin : CheatEnginePlugin
         {
             Run(report, "address-list-record-lifecycle", AddressListRecordLifecycle);
             Run(report, "structure-manager-lifecycle", StructureManagerLifecycle);
+            Run(report, "debugger-windows-reattach-lifecycle", DebuggerWindowsReattachLifecycle);
             Run(report, "cheat-table-save", CheatTableSavesFile);
             Run(report, "symbol-registry-lifecycle", SymbolRegistryLifecycle);
             Run(report, "memory-access-read-write", MemoryAccessRoundTripsValues);
@@ -126,6 +127,7 @@ public sealed class CesdkLiveTestPlugin : CheatEnginePlugin
             Run(report, "pointer-chains-resolve", PointerChainsResolveAllocatedMemory);
             Run(report, "aob-scanner-allocated-marker", AobScannerFindsAllocatedMarker);
             Run(report, "memscan-bounded-marker", MemScanFindsBoundedMarker);
+            Run(report, "memscan-next-scan-foundlist-lifecycle", MemScanNextScanReusesFoundList);
             Run(report, "found-list-lifecycle", FoundListReadsBoundedResults);
             Run(report, "injection-script-generation", InjectionGeneratesScript);
         }
@@ -134,6 +136,7 @@ public sealed class CesdkLiveTestPlugin : CheatEnginePlugin
             const string reason = "Mutating coverage requires a successfully attached disposable target.";
             Skip(report, "address-list-record-lifecycle", reason);
             Skip(report, "structure-manager-lifecycle", reason);
+            Skip(report, "debugger-windows-reattach-lifecycle", reason);
             Skip(report, "cheat-table-save", reason);
             Skip(report, "symbol-registry-lifecycle", reason);
             Skip(report, "memory-access-read-write", reason);
@@ -141,6 +144,7 @@ public sealed class CesdkLiveTestPlugin : CheatEnginePlugin
             Skip(report, "pointer-chains-resolve", reason);
             Skip(report, "aob-scanner-allocated-marker", reason);
             Skip(report, "memscan-bounded-marker", reason);
+            Skip(report, "memscan-next-scan-foundlist-lifecycle", reason);
             Skip(report, "found-list-lifecycle", reason);
             Skip(report, "injection-script-generation", reason);
         }
@@ -365,6 +369,52 @@ public sealed class CesdkLiveTestPlugin : CheatEnginePlugin
         _ = global::CESDK.Classes.Debugger.IsPaused();
         _ = global::CESDK.Classes.Debugger.GetCurrentDebuggerInterface();
         _ = global::CESDK.Classes.Debugger.GetBreakpointList();
+    }
+
+    private static void DebuggerWindowsReattachLifecycle()
+    {
+        int processId = global::CESDK.Classes.Process.GetOpenedProcessID();
+        AssertTrue(processId > 0, "A disposable target must be attached for debugger lifecycle coverage.");
+
+        try
+        {
+            for (int cycle = 1; cycle <= 2; cycle++)
+            {
+                DebuggerAttachResult attached =
+                    global::CESDK.Classes.Debugger.DebugProcess(1);
+                AssertTrue(
+                    global::CESDK.Classes.Debugger.IsDebugging(),
+                    $"Windows debugger cycle {cycle} should attach.");
+                AssertEqual(
+                    1,
+                    attached.ActualInterface,
+                    $"Windows debugger cycle {cycle} should use interface 1.");
+
+                DebuggerAttachResult idempotent =
+                    global::CESDK.Classes.Debugger.DebugProcess(1);
+                AssertTrue(
+                    idempotent.AlreadyAttached,
+                    $"Windows debugger cycle {cycle} should be idempotent.");
+                AssertEqual(
+                    processId,
+                    global::CESDK.Classes.Process.GetOpenedProcessID(),
+                    $"Idempotent attach cycle {cycle} should preserve the target PID.");
+
+                global::CESDK.Classes.Debugger.DetachIfPossible();
+                AssertFalse(
+                    global::CESDK.Classes.Debugger.IsDebugging(),
+                    $"Windows debugger cycle {cycle} should detach.");
+                AssertEqual(
+                    processId,
+                    global::CESDK.Classes.Process.GetOpenedProcessID(),
+                    $"Windows debugger cycle {cycle} should reopen and preserve the target PID.");
+            }
+        }
+        finally
+        {
+            if (global::CESDK.Classes.Debugger.IsDebugging())
+                global::CESDK.Classes.Debugger.DetachIfPossible();
+        }
     }
 
     private static void SpeedhackReportsSpeed() =>
@@ -618,6 +668,43 @@ public sealed class CesdkLiveTestPlugin : CheatEnginePlugin
                 AssertTrue(scanner.GetResultCount() >= 1, "Bounded MemScan should find the marker.");
                 AssertEqual(address, ParseAddress(scanner.GetResultAddress(0)), "First bounded MemScan result should be the marker address.");
                 AssertFalse(string.IsNullOrWhiteSpace(scanner.GetResultValue(0)), "Bounded MemScan result should expose a value.");
+            }
+            finally
+            {
+                scanner.DeinitializeResults();
+            }
+        }
+        finally
+        {
+            AdvancedMemory.Free(address);
+        }
+    }
+
+    private static void MemScanNextScanReusesFoundList()
+    {
+        const byte firstValue = 109;
+        const byte nextValue = 108;
+        ulong address = AdvancedMemory.Allocate(1);
+        try
+        {
+            AssertTrue(MemoryAccess.WriteByte(address, firstValue), "First-scan value should be writable.");
+            using var scanner = new MemScan();
+            scanner.NewScan();
+            scanner.Scan(CreateByteScan(address, firstValue));
+            scanner.WaitTillDone();
+            scanner.InitializeResults();
+            AssertTrue(scanner.GetResultCount() >= 1, "First scan should find the bounded byte.");
+            AssertEqual(address, ParseAddress(scanner.GetResultAddress(0)), "First scan should return the bounded byte.");
+
+            scanner.DeinitializeResults();
+            AssertTrue(MemoryAccess.WriteByte(address, nextValue), "Next-scan value should be writable.");
+            scanner.Scan(CreateByteScan(address, nextValue));
+            scanner.WaitTillDone();
+            scanner.InitializeResults();
+            try
+            {
+                AssertTrue(scanner.GetResultCount() >= 1, "Next scan should retain the changed bounded byte.");
+                AssertEqual(address, ParseAddress(scanner.GetResultAddress(0)), "Next scan should return the bounded byte.");
             }
             finally
             {

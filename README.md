@@ -91,7 +91,8 @@ Important invariants:
 - Keep an attachment check and the operation it protects inside the same synchronized block.
 - Restore the Lua stack to its original top in `finally` when using `LuaNative` directly.
 - Use 64-bit conversions for addresses, pointers, sizes, and registers.
-- Deinitialize a `FoundList` before starting another scan. Wait for scanning to finish before initializing and reading results.
+- Keep one owned `FoundList` per `MemScan`: deinitialize it before the next scan, wait for scanning to finish, then reinitialize it. Destroy the FoundList only when disposing the MemScan.
+- `Debugger.DetachIfPossible` unpauses and detaches while preserving CE's valid same-PID process handle. A subsequent inactive `DebugProcess` attaches directly; an active interface switch detaches once before attaching. CE fallbacks are reported by `DebuggerAttachResult`.
 - Dispose wrappers you own. Do not destroy CE-owned objects such as the current GUI `MemScan`.
 
 ## API Areas
@@ -185,7 +186,7 @@ finally
 }
 ```
 
-Call `DeinitializeResults()` before every subsequent scan. An initialized `FoundList` points into the prior result set; rescanning with it attached can crash Cheat Engine.
+Call `DeinitializeResults()` before every subsequent scan. `MemScan` keeps its owned FoundList object alive, deinitializes result access before the scan, and reinitializes the same object afterward. Destroying and recreating that FoundList between first/next scans can invalidate Cheat Engine's internal result ownership and crash the host.
 
 ### Work with the address list
 
@@ -322,7 +323,7 @@ Optional environment variables:
 | `CESDK_LIVE_TIMEOUT_SECONDS` | Overrides report polling timeout |
 | `CESDK_LIVE_MAX_RESULT_AGE_SECONDS` | Overrides accepted report age |
 
-The attached Notepad validation currently exercises 34 CESDK cases with no skipped cases.
+The attached Notepad validation currently exercises 35 CESDK cases with no skipped cases, including a first/next scan FoundList-lifecycle regression.
 
 ## Logging
 
