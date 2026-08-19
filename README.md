@@ -30,9 +30,11 @@ dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filte
 The live CESDK tests run through a dedicated Cheat Engine plugin:
 
 1. Build `tests/CESDK.LiveTestPlugin/CESDK.LiveTestPlugin.csproj`.
-2. Copy `tests/CESDK.LiveTestPlugin/bin/x64/Debug/net10.0-windows/cesdk-live-tests.dll` into Cheat Engine's plugins directory.
+2. Load `tests/CESDK.LiveTestPlugin/bin/x64/Debug/net10.0-windows/cesdk-live-tests.dll` in Cheat Engine.
 3. Restart Cheat Engine and enable `CESDK Live Tests`.
-4. Run the test harness:
+4. The plugin runs target-independent checks immediately. Target-dependent checks are reported as skipped—not failed—until a disposable process is attached.
+5. After attaching a process, choose `CESDK Tests` -> `Run Tests Against Attached Process`.
+6. Validate the generated report:
 
 ```powershell
 $env:CESDK_LIVE = "1"
@@ -40,6 +42,21 @@ dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filte
 ```
 
 By default the plugin writes `%TEMP%\cesdk-live-tests-result.json`. Set `CESDK_LIVE_RESULT` before launching Cheat Engine and before running `dotnet test` to use a custom result path.
+
+The default live run is inspection-only. Full wrapper coverage allocates and writes target memory and temporarily mutates CE address-list, structure, symbol, and table state. Set `CESDK_LIVE_MUTATING=1` before launching Cheat Engine, attach a disposable Notepad or other test process, then use the `CESDK Tests` menu:
+
+```powershell
+$env:CESDK_LIVE_MUTATING = "1"
+& "C:\Program Files\Cheat Engine\cheatengine-x86_64.exe"
+# Attach a disposable target in CE.
+# Choose CESDK Tests -> Run Tests Against Attached Process.
+$env:CESDK_LIVE = "1"
+dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filter TestCategory=Live
+```
+
+For unattended startup, `CESDK_LIVE_TARGET_PID` remains supported: set it to a disposable target PID before launching CE and the plugin attaches that process automatically. The report records `AttachedTargetProcessId`; the validator requires target-dependent tests to execute whenever it is present.
+
+CESDK and ce-mcp write through NLog to one canonical file: `%APPDATA%\CeMCP\ce-mcp.log`. The file rolls at 10 MiB and retains five archives.
 
 ## Install the API package
 

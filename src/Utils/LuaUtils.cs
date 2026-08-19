@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using CESDK.Lua;
 
@@ -11,113 +12,55 @@ namespace CESDK.Utils
         /// <summary>
         /// Generic method to call Lua functions with automatic parameter handling and error management
         /// </summary>
-        public static T CallLuaFunction<T>(string functionName, string operationName, Func<T> valueExtractor, params object[] args)
-        {
-            try
-            {
-                lua.GetGlobal(functionName);
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"{functionName} function not available in this CE version");
-                }
+        public static T CallLuaFunction<T>(
+            string functionName,
+            string operationName,
+            Func<T> valueExtractor,
+            params object?[] args) =>
+            CallLuaFunctionCore(functionName, operationName, valueExtractor, 1, args);
 
-                PushArguments(args);
-
-                var expectedReturnValues = typeof(T) == typeof(object) ? 0 : 1;
-                var result = lua.PCall(args.Length, expectedReturnValues);
-                if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"{functionName}() call failed: {error}");
-                }
-
-                var value = valueExtractor();
-                if (expectedReturnValues > 0)
-                {
-                    lua.Pop(1);
-                }
-                return value;
-            }
-            catch (Exception ex) when (ex is not InvalidOperationException)
-            {
-                throw new InvalidOperationException($"Failed to {operationName}", ex);
-            }
-        }
-
-        /// <summary>
-        /// Calls a Lua function with optional parameters and returns the specified type
-        /// </summary>
-        public static T CallLuaFunctionWithOptionalParams<T>(string functionName, string operationName, Func<T> valueExtractor, params object?[] parameters)
-        {
-            try
-            {
-                lua.GetGlobal(functionName);
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"{functionName} function not available in this CE version");
-                }
-
-                int paramCount = PushOptionalParameters(parameters);
-
-                var expectedReturnValues = typeof(T) == typeof(object) ? 0 : 1;
-                var result = lua.PCall(paramCount, expectedReturnValues);
-                if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"{functionName}() call failed: {error}");
-                }
-
-                var value = valueExtractor();
-                if (expectedReturnValues > 0)
-                {
-                    lua.Pop(1);
-                }
-                return value;
-            }
-            catch (Exception ex) when (ex is not InvalidOperationException)
-            {
-                throw new InvalidOperationException($"Failed to {operationName}", ex);
-            }
-        }
 
         /// <summary>
         /// Helper for void functions that don't return values
         /// </summary>
-        public static void CallVoidLuaFunction(string functionName, string operationName, params object[] args)
-        {
-            CallLuaFunction(functionName, operationName, VoidExtractor, args);
-        }
+        public static void CallVoidLuaFunction(
+            string functionName,
+            string operationName,
+            params object?[] args) =>
+            CallLuaFunctionCore(functionName, operationName, VoidExtractor, 0, args);
 
-        /// <summary>
-        /// Helper for void functions with optional parameters
-        /// </summary>
-        public static void CallVoidLuaFunctionWithOptionalParams(string functionName, string operationName, params object?[] parameters) =>
-            CallLuaFunctionWithOptionalParams<object>(functionName, operationName, VoidExtractor, parameters);
 
         /// <summary>
         /// Extracts byte array from Lua table
         /// </summary>
         public static byte[] ExtractBytesFromTable()
         {
-            var bytes = new List<byte>();
-            if (lua.IsUserData(-1) || lua.IsTable(-1))
+            if (!lua.IsTable(-1))
+                throw new InvalidOperationException("Expected a byte table");
+
+            int length = lua.RawLen(-1);
+            var bytes = new byte[length];
+            for (int index = 1; index <= length; index++)
             {
-                lua.PushNil();
-                while (lua.Next(-2) != 0)
+                lua.PushInteger(index);
+                lua.GetTable(-2);
+                try
                 {
-                    if (lua.IsNumber(-1))
-                    {
-                        var byteValue = (byte)lua.ToInteger(-1);
-                        bytes.Add(byteValue);
-                    }
+                    if (!lua.IsInteger(-1))
+                        throw new InvalidOperationException($"Byte table item {index} is not an integer");
+
+                    long value = lua.ToInteger64(-1);
+                    if (value is < byte.MinValue or > byte.MaxValue)
+                        throw new InvalidOperationException($"Byte table item {index} is outside the byte range");
+
+                    bytes[index - 1] = (byte)value;
+                }
+                finally
+                {
                     lua.Pop(1);
                 }
             }
-            return [.. bytes];
+            return bytes;
         }
 
         /// <summary>
@@ -129,7 +72,7 @@ namespace CESDK.Utils
 
             if (lua.IsNumber(-1))
             {
-                address = (ulong)lua.ToInteger(-1);
+                address = (ulong)lua.ToInteger64(-1);
             }
             else if (lua.IsString(-1))
             {
@@ -140,74 +83,151 @@ namespace CESDK.Utils
                 }
             }
 
-            lua.Pop(1);
             return address;
         }
 
-        private static void PushArguments(params object[] args)
+        private static T CallLuaFunctionCore<T>(
+            string functionName,
+            string operationName,
+            Func<T> valueExtractor,
+            int expectedReturnValues,
+            object?[] args)
         {
-            foreach (var arg in args)
+            int initialTop = lua.GetTop();
+            try
             {
-                switch (arg)
+                lua.GetGlobal(functionName);
+                if (!lua.IsFunction(-1))
+                    throw new InvalidOperationException($"{functionName} function not available in this CE version");
+
+                PushArguments(args);
+
+                int result = lua.PCall(args.Length, expectedReturnValues);
+                if (result != 0)
                 {
-                    case long longValue: lua.PushInteger(longValue); break;
-                    case int intValue: lua.PushInteger(intValue); break;
-                    case ulong ulongValue: lua.PushInteger((long)ulongValue); break;
-                    case short shortValue: lua.PushInteger(shortValue); break;
-                    case byte byteValue: lua.PushInteger(byteValue); break;
-                    case float floatValue: lua.PushNumber(floatValue); break;
-                    case double doubleValue: lua.PushNumber(doubleValue); break;
-                    case string stringValue: lua.PushString(stringValue); break;
-                    case bool boolValue: lua.PushBoolean(boolValue); break;
-                    case byte[] bytes:
-                        lua.CreateTable();
-                        for (int i = 0; i < bytes.Length; i++)
-                        {
-                            lua.PushInteger(i + 1);
-                            lua.PushInteger(bytes[i]);
-                            lua.SetTable(-3);
-                        }
-                        break;
-                    default:
-                        throw new ArgumentException($"Unsupported argument type: {arg.GetType()}");
+                    string error = lua.ToString(-1);
+                    throw new InvalidOperationException($"{functionName}() call failed: {error}");
                 }
+
+                return valueExtractor();
+            }
+            catch (Exception ex) when (ex is not InvalidOperationException)
+            {
+                throw new InvalidOperationException($"Failed to {operationName}", ex);
+            }
+            finally
+            {
+                lua.SetTop(initialTop);
             }
         }
 
-        private static int PushOptionalParameters(params object?[] parameters)
+        private static void PushArguments(object?[] args)
         {
-            int paramCount = 0;
-
-            foreach (var param in parameters)
-            {
-                if (param == null) continue;
-
-                switch (param)
-                {
-                    case string stringValue:
-                        if (!string.IsNullOrEmpty(stringValue))
-                        {
-                            lua.PushString(stringValue);
-                            paramCount++;
-                        }
-                        break;
-                    case int intValue:
-                        if (intValue != 0)
-                        {
-                            lua.PushInteger(intValue);
-                            paramCount++;
-                        }
-                        break;
-                    default:
-                        // For non-optional parameters, always push
-                        PushArguments(param);
-                        paramCount++;
-                        break;
-                }
-            }
-
-            return paramCount;
+            foreach (object? arg in args)
+                PushArgument(arg);
         }
+
+        private static void PushArgument(object? arg)
+        {
+            switch (arg)
+            {
+                case null:
+                    lua.PushNil();
+                    break;
+                case long value:
+                    lua.PushInteger(value);
+                    break;
+                case int value:
+                    lua.PushInteger(value);
+                    break;
+                case ulong value:
+                    lua.PushInteger((long)value);
+                    break;
+                case uint value:
+                    lua.PushInteger(value);
+                    break;
+                case short value:
+                    lua.PushInteger(value);
+                    break;
+                case ushort value:
+                    lua.PushInteger(value);
+                    break;
+                case byte value:
+                    lua.PushInteger(value);
+                    break;
+                case sbyte value:
+                    lua.PushInteger(value);
+                    break;
+                case float value:
+                    lua.PushNumber(value);
+                    break;
+                case double value:
+                    lua.PushNumber(value);
+                    break;
+                case decimal value:
+                    lua.PushNumber((double)value);
+                    break;
+                case string value:
+                    lua.PushString(value);
+                    break;
+                case char value:
+                    lua.PushString(value.ToString());
+                    break;
+                case bool value:
+                    lua.PushBoolean(value);
+                    break;
+                case Enum value:
+                    lua.PushInteger(Convert.ToInt64(value));
+                    break;
+                case IntPtr value:
+                    lua.PushInteger(value.ToInt64());
+                    break;
+                case byte[] bytes:
+                    PushByteTable(bytes);
+                    break;
+                case IReadOnlyDictionary<string, object?> dictionary:
+                    lua.CreateTable();
+                    foreach (KeyValuePair<string, object?> entry in dictionary)
+                    {
+                        PushArgument(entry.Value);
+                        lua.SetField(-2, entry.Key);
+                    }
+                    break;
+                case IDictionary dictionary:
+                    lua.CreateTable();
+                    foreach (DictionaryEntry entry in dictionary)
+                    {
+                        PushArgument(entry.Key);
+                        PushArgument(entry.Value);
+                        lua.SetTable(-3);
+                    }
+                    break;
+                case IEnumerable values:
+                    lua.CreateTable();
+                    int index = 1;
+                    foreach (object? value in values)
+                    {
+                        lua.PushInteger(index++);
+                        PushArgument(value);
+                        lua.SetTable(-3);
+                    }
+                    break;
+                default:
+                    throw new ArgumentException($"Unsupported argument type: {arg.GetType()}");
+            }
+        }
+
+        private static void PushByteTable(byte[] bytes)
+        {
+            lua.CreateTable();
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                lua.PushInteger(i + 1);
+                lua.PushInteger(bytes[i]);
+                lua.SetTable(-3);
+            }
+        }
+
 
         private static object VoidExtractor() => null!;
     }

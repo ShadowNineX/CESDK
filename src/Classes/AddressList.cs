@@ -18,7 +18,7 @@ namespace CESDK.Classes
     {
         internal MemoryRecord()
         {
-            // Empty constructor for setting CE object from stack
+            SuppressDestroy = true;
         }
 
         /// <summary>
@@ -36,6 +36,12 @@ namespace CESDK.Classes
         /// Internal pointer for passing to other CE functions
         /// </summary>
         internal IntPtr Obj => CEObject;
+
+        internal void Delete()
+        {
+            SuppressDestroy = false;
+            Dispose();
+        }
 
         #region Properties
 
@@ -75,7 +81,7 @@ namespace CESDK.Classes
         /// <summary>
         /// Gets the current resolved address as an integer
         /// </summary>
-        public long CurrentAddress => GetLongProperty("CurrentAddress");
+        public ulong CurrentAddress => (ulong)GetLongProperty("CurrentAddress");
 
         /// <summary>
         /// Gets or sets the variable type of this record
@@ -98,29 +104,7 @@ namespace CESDK.Classes
         /// <summary>
         /// Gets or sets the value in numerical form. Returns null if it cannot be parsed.
         /// </summary>
-        public double? NumericalValue
-        {
-            get
-            {
-                try
-                {
-                    lua.PushCEObject(CEObject);
-                    lua.GetField(-1, "NumericalValue");
-                    if (lua.IsNil(-1))
-                    {
-                        lua.Pop(2);
-                        return null;
-                    }
-                    var val = lua.ToNumber(-1);
-                    lua.Pop(2);
-                    return val;
-                }
-                catch
-                {
-                    return null;
-                }
-            }
-        }
+        public double? NumericalValue => GetNullableNumberProperty("NumericalValue");
 
         /// <summary>
         /// Gets whether this record is selected
@@ -252,110 +236,53 @@ namespace CESDK.Classes
         /// <summary>
         /// Gets an offset at the given index
         /// </summary>
-        public long GetOffset(int index)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "getOffset");
-                if (!lua.IsFunction(-1))
+        public long GetOffset(int index) =>
+            CallMethod(
+                "getOffset",
+                () => lua.PushInteger(index),
+                1,
+                () =>
                 {
-                    lua.Pop(2);
-                    throw new AddressListException("getOffset method not available");
-                }
-                lua.PushInteger(index);
-                lua.PCall(1, 1);
-                var result = lua.ToInteger(-1);
-                lua.Pop(2);
-                return result;
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException($"Failed to get offset at index {index}", ex);
-            }
-        }
+                    if (!lua.IsNumber(-1))
+                        throw new AddressListException($"getOffset returned no value for index {index}");
+                    return lua.ToInteger64(-1);
+                });
 
         /// <summary>
         /// Sets an offset at the given index
         /// </summary>
-        public void SetOffset(int index, long value)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "setOffset");
-                if (!lua.IsFunction(-1))
+        public void SetOffset(int index, long value) =>
+            CallMethod(
+                "setOffset",
+                () =>
                 {
-                    lua.Pop(2);
-                    throw new AddressListException("setOffset method not available");
-                }
-                lua.PushInteger(index);
-                lua.PushInteger(value);
-                lua.PCall(2, 0);
-                lua.Pop(1);
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException($"Failed to set offset at index {index}", ex);
-            }
-        }
+                    lua.PushInteger(index);
+                    lua.PushInteger(value);
+                },
+                2);
 
         /// <summary>
         /// Gets a child memory record at the given index
         /// </summary>
-        public MemoryRecord GetChild(int index)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "Child");
-                if (!lua.IsTable(-1))
+        public MemoryRecord GetChild(int index) =>
+            GetIndexedProperty(
+                "Child",
+                index,
+                () =>
                 {
-                    lua.Pop(2);
-                    throw new AddressListException("Child property not available");
-                }
-                lua.PushInteger(index);
-                lua.GetTable(-2);
-                if (lua.IsNil(-1))
-                {
-                    lua.Pop(3);
-                    throw new AddressListException($"No child at index {index}");
-                }
-                var child = new MemoryRecord();
-                child.SetFromStack();
-                lua.Pop(3);
-                return child;
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException($"Failed to get child at index {index}", ex);
-            }
-        }
+                    if (!lua.IsCEObject(-1))
+                        throw new AddressListException($"No child at index {index}");
+
+                    var child = new MemoryRecord();
+                    child.SetFromStack();
+                    return child;
+                });
 
         /// <summary>
         /// Appends this memory record to another memory record (makes it a child)
         /// </summary>
-        public void AppendToEntry(MemoryRecord parent)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "appendToEntry");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("appendToEntry method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PushCEObject(parent.Obj);
-                lua.PCall(2, 0);
-                lua.Pop(1);
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException("Failed to append to entry", ex);
-            }
-        }
+        public void AppendToEntry(MemoryRecord parent) =>
+            CallMethod("appendToEntry", () => lua.PushCEObject(parent.Obj), 1);
 
         /// <summary>
         /// Disables the entry without executing the disable section
@@ -400,22 +327,26 @@ namespace CESDK.Classes
     {
         public AddressList()
         {
+            int initialTop = lua.GetTop();
             try
             {
                 lua.GetGlobal("getAddressList");
-                if (lua.IsNil(-1))
+                if (!lua.IsFunction(-1))
                     throw new AddressListException("getAddressList function not available");
 
-                lua.PCall(0, 1);
+                int result = lua.PCall(0, 1);
+                if (result != 0)
+                    throw new AddressListException($"getAddressList() call failed: {lua.ToString(-1)}");
 
-                if (lua.IsCEObject(-1))
-                    CEObject = lua.ToCEObject(-1);
-                else
+                if (!lua.IsCEObject(-1))
                     throw new AddressListException("getAddressList did not return a valid object");
+
+                CEObject = lua.ToCEObject(-1);
+                SuppressDestroy = true;
             }
             finally
             {
-                lua.SetTop(0);
+                lua.SetTop(initialTop);
             }
         }
 
@@ -452,72 +383,22 @@ namespace CESDK.Classes
         /// <summary>
         /// Gets a memory record at the specified index
         /// </summary>
-        public MemoryRecord GetMemoryRecord(int index)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "getMemoryRecord");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("getMemoryRecord method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PushInteger(index);
-                lua.PCall(2, 1);
-
-                if (lua.IsNil(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException($"No memory record at index {index}");
-                }
-
-                var record = new MemoryRecord();
-                record.SetFromStack();
-                lua.Pop(2);
-                return record;
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException($"Failed to get memory record at index {index}", ex);
-            }
-        }
+        public MemoryRecord GetMemoryRecord(int index) =>
+            CallMethod(
+                "getMemoryRecord",
+                () => lua.PushInteger(index),
+                1,
+                () => ReadRecord($"No memory record at index {index}"));
 
         /// <summary>
         /// Gets a memory record by its description
         /// </summary>
-        public MemoryRecord? GetMemoryRecordByDescription(string description)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "getMemoryRecordByDescription");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("getMemoryRecordByDescription method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PushString(description);
-                lua.PCall(2, 1);
-
-                if (lua.IsNil(-1))
-                {
-                    lua.Pop(2);
-                    return null;
-                }
-
-                var record = new MemoryRecord();
-                record.SetFromStack();
-                lua.Pop(2);
-                return record;
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException($"Failed to get memory record by description '{description}'", ex);
-            }
-        }
+        public MemoryRecord? GetMemoryRecordByDescription(string description) =>
+            CallMethod(
+                "getMemoryRecordByDescription",
+                () => lua.PushString(description),
+                1,
+                ReadOptionalRecord);
 
         /// <summary>
         /// Gets all memory records with the specified description
@@ -525,213 +406,62 @@ namespace CESDK.Classes
         public List<MemoryRecord> GetMemoryRecordsWithDescription(string description)
         {
             var records = new List<MemoryRecord>();
-            try
+            for (int index = 0; index < Count; index++)
             {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "getMemoryRecordsWithDescription");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("getMemoryRecordsWithDescription method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PushString(description);
-                lua.PCall(2, 1);
-
-                if (lua.IsTable(-1))
-                {
-                    // Iterate through the table
-                    lua.PushNil();
-                    while (lua.Next(-2) != 0)
-                    {
-                        if (lua.IsCEObject(-1))
-                        {
-                            var record = new MemoryRecord();
-                            record.SetFromStack();
-                            records.Add(record);
-                        }
-                        lua.Pop(1); // Pop value, keep key for next iteration
-                    }
-                }
-
-                lua.Pop(2);
-                return records;
+                MemoryRecord record = GetMemoryRecord(index);
+                if (string.Equals(record.Description, description, StringComparison.Ordinal))
+                    records.Add(record);
+                else
+                    record.Dispose();
             }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException($"Failed to get memory records with description '{description}'", ex);
-            }
+            return records;
         }
 
         /// <summary>
         /// Gets a memory record by its unique ID
         /// </summary>
-        public MemoryRecord? GetMemoryRecordByID(int id)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "getMemoryRecordByID");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("getMemoryRecordByID method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PushInteger(id);
-                lua.PCall(2, 1);
-
-                if (lua.IsNil(-1))
-                {
-                    lua.Pop(2);
-                    return null;
-                }
-
-                var record = new MemoryRecord();
-                record.SetFromStack();
-                lua.Pop(2);
-                return record;
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException($"Failed to get memory record by ID {id}", ex);
-            }
-        }
+        public MemoryRecord? GetMemoryRecordByID(int id) =>
+            CallMethod(
+                "getMemoryRecordByID",
+                () => lua.PushInteger(id),
+                1,
+                ReadOptionalRecord);
 
         /// <summary>
         /// Creates a new memory record and adds it to the address list
         /// </summary>
-        public MemoryRecord CreateMemoryRecord()
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "createMemoryRecord");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("createMemoryRecord method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PCall(1, 1);
-
-                if (lua.IsNil(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("createMemoryRecord returned nil");
-                }
-
-                var record = new MemoryRecord();
-                record.SetFromStack();
-                lua.Pop(2);
-                return record;
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException("Failed to create memory record", ex);
-            }
-        }
+        public MemoryRecord CreateMemoryRecord() =>
+            CallMethod(
+                "createMemoryRecord",
+                () => { },
+                0,
+                () => ReadRecord("createMemoryRecord returned no MemoryRecord"));
 
         /// <summary>
         /// Gets the currently selected memory record
         /// </summary>
-        public MemoryRecord? GetSelectedRecord()
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "getSelectedRecord");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("getSelectedRecord method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PCall(1, 1);
-
-                if (lua.IsNil(-1))
-                {
-                    lua.Pop(2);
-                    return null;
-                }
-
-                var record = new MemoryRecord();
-                record.SetFromStack();
-                lua.Pop(2);
-                return record;
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException("Failed to get selected record", ex);
-            }
-        }
+        public MemoryRecord? GetSelectedRecord() =>
+            CallMethod(
+                "getSelectedRecord",
+                () => { },
+                0,
+                ReadOptionalRecord);
 
         /// <summary>
         /// Sets the currently selected memory record (unselects all others)
         /// </summary>
-        public void SetSelectedRecord(MemoryRecord record)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "setSelectedRecord");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("setSelectedRecord method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PushCEObject(record.Obj);
-                lua.PCall(2, 0);
-                lua.Pop(1);
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException("Failed to set selected record", ex);
-            }
-        }
+        public void SetSelectedRecord(MemoryRecord record) =>
+            CallMethod("setSelectedRecord", () => lua.PushCEObject(record.Obj), 1);
 
         /// <summary>
         /// Gets all selected memory records
         /// </summary>
-        public List<MemoryRecord> GetSelectedRecords()
-        {
-            var records = new List<MemoryRecord>();
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.GetField(-1, "getSelectedRecords");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("getSelectedRecords method not available");
-                }
-                lua.PushValue(-2); // self
-                lua.PCall(1, 1);
-
-                if (lua.IsTable(-1))
-                {
-                    lua.PushNil();
-                    while (lua.Next(-2) != 0)
-                    {
-                        if (lua.IsCEObject(-1))
-                        {
-                            var record = new MemoryRecord();
-                            record.SetFromStack();
-                            records.Add(record);
-                        }
-                        lua.Pop(1);
-                    }
-                }
-
-                lua.Pop(2);
-                return records;
-            }
-            catch (Exception ex) when (ex is not AddressListException)
-            {
-                throw new AddressListException("Failed to get selected records", ex);
-            }
-        }
+        public List<MemoryRecord> GetSelectedRecords() =>
+            CallMethod(
+                "getSelectedRecords",
+                () => { },
+                0,
+                ReadRecordList);
 
         /// <summary>
         /// Disables all memory records without executing their [Disable] section
@@ -754,19 +484,9 @@ namespace CESDK.Classes
         /// </summary>
         public void DeleteMemoryRecord(MemoryRecord record)
         {
-            // In CE Lua, calling destroy on the memory record removes it from the list
             try
             {
-                lua.PushCEObject(record.Obj);
-                lua.GetField(-1, "destroy");
-                if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new AddressListException("destroy method not available on memory record");
-                }
-                lua.PushValue(-2); // self
-                lua.PCall(1, 0);
-                lua.Pop(1);
+                record.Delete();
             }
             catch (Exception ex) when (ex is not AddressListException)
             {
@@ -802,19 +522,10 @@ namespace CESDK.Classes
         /// </summary>
         public List<MemoryRecord> GetAllRecords()
         {
-            var records = new List<MemoryRecord>();
-            var count = Count;
+            int count = Count;
+            var records = new List<MemoryRecord>(count);
             for (int i = 0; i < count; i++)
-            {
-                try
-                {
-                    records.Add(GetMemoryRecord(i));
-                }
-                catch
-                {
-                    // Skip records that fail to load
-                }
-            }
+                records.Add(GetMemoryRecord(i));
             return records;
         }
 
@@ -823,18 +534,48 @@ namespace CESDK.Classes
         /// </summary>
         public void Clear()
         {
-            // Delete records in reverse order to avoid index shifting issues
             for (int i = Count - 1; i >= 0; i--)
+                DeleteMemoryRecordAt(i);
+        }
+
+        private MemoryRecord ReadRecord(string error)
+        {
+            if (!lua.IsCEObject(-1))
+                throw new AddressListException(error);
+
+            var record = new MemoryRecord();
+            record.SetFromStack();
+            return record;
+        }
+
+        private MemoryRecord? ReadOptionalRecord() =>
+            lua.IsNil(-1) ? null : ReadRecord("Cheat Engine returned an invalid MemoryRecord");
+
+        private List<MemoryRecord> ReadRecordList()
+        {
+            if (lua.IsNil(-1))
+                return [];
+
+            if (!lua.IsTable(-1))
+                throw new AddressListException("Cheat Engine returned an invalid MemoryRecord list");
+
+            var records = new List<MemoryRecord>();
+            lua.PushNil();
+            while (lua.Next(-2) != 0)
             {
                 try
                 {
-                    DeleteMemoryRecordAt(i);
+                    if (!lua.IsCEObject(-1))
+                        throw new AddressListException("Cheat Engine returned an invalid MemoryRecord");
+
+                    records.Add(ReadRecord("Cheat Engine returned an invalid MemoryRecord"));
                 }
-                catch
+                finally
                 {
-                    // Continue trying to delete other records
+                    lua.Pop(1);
                 }
             }
+            return records;
         }
 
         #endregion

@@ -50,31 +50,22 @@ namespace CESDK.Classes
         /// <exception cref="LuaExecutorException">Thrown if the script fails to compile or execute.</exception>
         public static LuaResult Execute(string script)
         {
+            int initialStackSize = lua.GetTop();
             try
             {
-                var initialStackSize = lua.GetTop();
-
                 lua.DoString(script);
 
-                var finalStackSize = lua.GetTop();
-                var returnCount = finalStackSize - initialStackSize;
-
+                int returnCount = lua.GetTop() - initialStackSize;
                 if (returnCount <= 0)
                     return new LuaResult { ReturnCount = 0 };
 
                 if (returnCount == 1)
-                {
-                    var value = ReadStackValue(-1);
-                    lua.Pop(1);
-                    return new LuaResult { Value = value, ReturnCount = 1 };
-                }
+                    return new LuaResult { Value = ReadStackValue(-1), ReturnCount = 1 };
 
-                // Multiple return values
-                var values = new List<object?>();
+                var values = new List<object?>(returnCount);
                 for (int i = 0; i < returnCount; i++)
                     values.Add(ReadStackValue(initialStackSize + 1 + i));
 
-                lua.Pop(returnCount);
                 return new LuaResult { Values = values, ReturnCount = returnCount };
             }
             catch (InvalidOperationException ex)
@@ -84,6 +75,10 @@ namespace CESDK.Classes
             catch (Exception ex) when (ex is not LuaExecutorException)
             {
                 throw new LuaExecutorException($"Lua execution failed: {ex.Message}", ex);
+            }
+            finally
+            {
+                lua.SetTop(initialStackSize);
             }
         }
 
@@ -105,7 +100,7 @@ namespace CESDK.Classes
                 0 => null,                                              // LUA_TNIL
                 1 => lua.ToBoolean(index),                              // LUA_TBOOLEAN
                 3 => lua.IsInteger(index)                               // LUA_TNUMBER
-                    ? (object)lua.ToInteger(index)
+                    ? (object)lua.ToInteger64(index)
                     : lua.ToNumber(index),
                 4 => lua.ToString(index),                               // LUA_TSTRING
                 5 => ReadTable(index, depth),                           // LUA_TTABLE
@@ -216,7 +211,7 @@ namespace CESDK.Classes
             int keyType = lua.Type(index);
             return keyType switch
             {
-                3 => lua.IsInteger(index) ? lua.ToInteger(index).ToString() : lua.ToNumber(index).ToString(),
+                3 => lua.IsInteger(index) ? lua.ToInteger64(index).ToString() : lua.ToNumber(index).ToString(),
                 4 => lua.ToString(index) ?? "",
                 1 => lua.ToBoolean(index).ToString(),
                 _ => $"[{GetTypeName(keyType)}]"

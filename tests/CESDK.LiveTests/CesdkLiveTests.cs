@@ -35,13 +35,86 @@ public sealed class CesdkLiveTests
         Assert.IsTrue(report.Tests.Count > 0, "The CESDK live test report did not contain any test cases.");
         Assert.IsTrue(report.Success, FormatFailures(report));
 
-        CollectionAssert.Contains(testNames, "lua-native-do-string");
-        CollectionAssert.Contains(testNames, "lua-native-register-function");
-        CollectionAssert.Contains(testNames, "lua-native-register-ce-function");
-        CollectionAssert.Contains(testNames, "lua-executor-multiple-results");
-        CollectionAssert.Contains(testNames, "lua-executor-table-results");
-        CollectionAssert.Contains(testNames, "converter-string-md5");
-        CollectionAssert.Contains(testNames, "cesdk-synchronize");
+        var expectedTestNames = new List<string>
+        {
+            "lua-native-do-string",
+            "lua-native-register-function",
+            "lua-native-register-ce-function",
+            "lua-executor-multiple-results",
+            "lua-executor-table-results",
+            "converter-string-md5",
+            "cesdk-synchronize",
+            "plugin-context-current-plugin",
+            "plugin-logger-nlog-file",
+            "lua-logger-print",
+            "process-list-attached-target",
+            "process-control-status",
+            "address-resolver-module",
+            "symbol-manager-modules",
+            "symbol-waiter-sections",
+            "thread-list-current-process",
+            "memory-regions-enumeration",
+            "debugger-status-queries",
+            "speedhack-current-speed",
+            "dbvm-availability",
+            "assembler-nop",
+            "disassembler-module",
+            "ce-object-wrapper-double-dispose",
+        };
+
+        if (testNames.Contains("process-open-configured-target", StringComparer.Ordinal))
+        {
+            expectedTestNames.Add("process-open-configured-target");
+        }
+
+        if (report.MutatingTestsEnabled)
+        {
+            expectedTestNames.AddRange(
+            [
+                "address-list-record-lifecycle",
+                "structure-manager-lifecycle",
+                "cheat-table-save",
+                "symbol-registry-lifecycle",
+                "memory-access-read-write",
+                "advanced-memory-copy-compare-file",
+                "pointer-chains-resolve",
+                "aob-scanner-allocated-marker",
+                "memscan-bounded-marker",
+                "found-list-lifecycle",
+                "injection-script-generation",
+            ]);
+        }
+
+        if (Environment.GetEnvironmentVariable("CESDK_LIVE_MUTATING") == "1")
+            Assert.IsTrue(report.MutatingTestsEnabled, "The CE plugin did not run the requested mutating coverage.");
+
+        CollectionAssert.AreEquivalent(
+            expectedTestNames,
+            testNames,
+            "Live report should contain every test for its selected safety mode.");
+
+        string[] targetDependentNames =
+        [
+            "process-list-attached-target",
+            "process-control-status",
+            "address-resolver-module",
+            "symbol-manager-modules",
+            "thread-list-current-process",
+            "memory-regions-enumeration",
+            "speedhack-current-speed",
+            "disassembler-module",
+        ];
+        bool targetConfigured = report.AttachedTargetProcessId > 0;
+        foreach (string name in targetDependentNames)
+        {
+            LiveTestCase test = report.Tests.Single(item => item.Name == name);
+            Assert.AreEqual(
+                !targetConfigured,
+                test.Skipped,
+                $"Target-dependent test '{name}' should {(targetConfigured ? "execute" : "be skipped")}.");
+            if (test.Skipped)
+                Assert.IsFalse(string.IsNullOrWhiteSpace(test.SkipReason), $"Skipped test '{name}' should explain why.");
+        }
     }
 
     private static async Task<LiveTestReport> WaitForReportAsync()
@@ -91,7 +164,7 @@ public sealed class CesdkLiveTests
     private static string FormatFailures(LiveTestReport report)
     {
         IEnumerable<string> failures = report.Tests
-            .Where(test => !test.Success)
+            .Where(test => !test.Success && !test.Skipped)
             .Select(test => $"{test.Name}: {test.Error}");
 
         string details = string.Join(Environment.NewLine, failures);
@@ -104,6 +177,8 @@ public sealed class CesdkLiveTests
     {
         public string Plugin { get; set; } = "";
         public bool Success { get; set; }
+        public bool MutatingTestsEnabled { get; set; }
+        public int? AttachedTargetProcessId { get; set; }
         public DateTimeOffset StartedAtUtc { get; set; }
         public DateTimeOffset FinishedAtUtc { get; set; }
         public List<LiveTestCase> Tests { get; set; } = [];
@@ -113,6 +188,8 @@ public sealed class CesdkLiveTests
     {
         public string Name { get; set; } = "";
         public bool Success { get; set; }
+        public bool Skipped { get; set; }
+        public string? SkipReason { get; set; }
         public long DurationMs { get; set; }
         public string? Error { get; set; }
     }

@@ -14,14 +14,24 @@ namespace CESDK.Classes
     public static class AobScanner
     {
         public static List<ulong> Scan(string pattern, string? protectionFlags = null, int alignmentType = 0, string? alignmentParam = null) =>
-            WrapException(() =>
-            {
-                LuaUtils.CallVoidLuaFunctionWithOptionalParams("AOBScan", "perform AOB scan", pattern, protectionFlags ?? string.Empty, alignmentType, alignmentParam ?? string.Empty);
-                return ProcessScanResults();
-            });
+            WrapException(() => LuaUtils.CallLuaFunction(
+                "AOBScan",
+                "perform AOB scan",
+                ProcessScanResults,
+                pattern,
+                protectionFlags ?? string.Empty,
+                alignmentType,
+                alignmentParam ?? string.Empty));
 
         public static ulong? ScanUnique(string pattern, string? protectionFlags = null, int alignmentType = 0, string? alignmentParam = null) =>
-            WrapException(() => LuaUtils.CallLuaFunctionWithOptionalParams("AOBScanUnique", "perform unique AOB scan", LuaUtils.ParseAddressFromStack, pattern, protectionFlags ?? string.Empty, alignmentType, alignmentParam ?? string.Empty));
+            WrapException(() => LuaUtils.CallLuaFunction(
+                "AOBScanUnique",
+                "perform unique AOB scan",
+                LuaUtils.ParseAddressFromStack,
+                pattern,
+                protectionFlags ?? string.Empty,
+                alignmentType,
+                alignmentParam ?? string.Empty));
 
         public static ulong? ScanModuleUnique(string moduleName, string pattern, string? protectionFlags = null, int alignmentType = 0, string? alignmentParam = null) =>
             WrapException(() => LuaUtils.CallLuaFunction("AOBScanModuleUnique", "perform module unique AOB scan", LuaUtils.ParseAddressFromStack, moduleName, pattern, protectionFlags ?? string.Empty, alignmentType, alignmentParam ?? string.Empty));
@@ -31,45 +41,63 @@ namespace CESDK.Classes
             var addresses = new List<ulong>();
             var lua = PluginContext.Lua;
 
-            if (!lua.IsUserData(-1))
+            if (lua.IsNil(-1))
+                return addresses;
+            if (!lua.IsCEObject(-1))
+                throw new InvalidOperationException("AOBScan returned an invalid result list");
+
+            int resultTop = lua.GetTop();
+            try
             {
+                lua.GetField(-1, "Count");
+                if (!lua.IsNumber(-1))
+                    throw new InvalidOperationException("AOBScan result count is unavailable");
+
+                int count = lua.ToInteger(-1);
                 lua.Pop(1);
+                for (int index = 0; index < count; index++)
+                    ProcessSingleResult(addresses, index, lua);
                 return addresses;
             }
-
-            lua.GetField(-1, "Count");
-            if (!lua.IsNumber(-1))
+            finally
             {
-                lua.Pop(2);
-                return addresses;
+                lua.SetTop(resultTop);
+                DestroyScanResults(lua);
             }
-
-            var count = lua.ToInteger(-1);
-            lua.Pop(1);
-
-            for (int i = 0; i < count; i++)
-            {
-                ProcessSingleResult(addresses, i, lua);
-            }
-
-            lua.Pop(1);
-            return addresses;
         }
 
         private static void ProcessSingleResult(List<ulong> addresses, int index, LuaNative lua)
         {
             lua.PushInteger(index);
             lua.GetTable(-2);
-
-            if (lua.IsString(-1))
+            try
             {
-                var addressStr = lua.ToString(-1);
-                if (ulong.TryParse(addressStr, System.Globalization.NumberStyles.HexNumber, null, out var address))
-                {
-                    addresses.Add(address);
-                }
+                if (!lua.IsString(-1))
+                    throw new InvalidOperationException($"AOBScan returned no address at index {index}");
+
+                string addressText = lua.ToString(-1) ?? "";
+                if (!ulong.TryParse(
+                        addressText,
+                        System.Globalization.NumberStyles.HexNumber,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out ulong address))
+                    throw new InvalidOperationException($"AOBScan returned invalid address '{addressText}'");
+                addresses.Add(address);
             }
-            lua.Pop(1);
+            finally
+            {
+                lua.Pop(1);
+            }
+        }
+
+        private static void DestroyScanResults(LuaNative lua)
+        {
+            lua.GetField(-1, "destroy");
+            if (!lua.IsFunction(-1))
+                throw new InvalidOperationException("AOBScan result list cannot be destroyed");
+            int result = lua.PCall(0, 0);
+            if (result != 0)
+                throw new InvalidOperationException($"AOBScan result cleanup failed: {lua.ToString(-1)}");
         }
 
         private static T WrapException<T>(Func<T> operation)

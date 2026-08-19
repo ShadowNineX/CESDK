@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using CESDK.Utils;
 
 namespace CESDK.Classes
@@ -44,14 +42,6 @@ namespace CESDK.Classes
         public static void WaitForDotNet() => WaitFor(SymbolLevel.DotNet);
         public static void WaitForPDB() => WaitFor(SymbolLevel.PDB);
 
-        public static Task WaitForSectionsAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
-            WaitForAsync(SymbolLevel.Sections, timeout, cancellationToken);
-        public static Task WaitForExportsAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
-            WaitForAsync(SymbolLevel.Exports, timeout, cancellationToken);
-        public static Task WaitForDotNetAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
-            WaitForAsync(SymbolLevel.DotNet, timeout, cancellationToken);
-        public static Task WaitForPDBAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
-            WaitForAsync(SymbolLevel.PDB, timeout, cancellationToken);
 
         public static void WaitFor(SymbolLevel level)
         {
@@ -68,25 +58,5 @@ namespace CESDK.Classes
             }
         }
 
-        public static async Task WaitForAsync(SymbolLevel level, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-            if (timeout.HasValue)
-                cts.CancelAfter(timeout.Value);
-
-            try
-            {
-                await Task.Run(() =>
-                {
-                    cts.Token.ThrowIfCancellationRequested();
-                    WaitFor(level);
-                }, cts.Token);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && timeout.HasValue)
-            {
-                throw new TimeoutException($"Timeout waiting for {level} symbols after {timeout.Value.TotalSeconds:F1} seconds");
-            }
-        }
     }
 }

@@ -40,50 +40,50 @@ namespace CESDK.Classes
         {
             return WrapException(() =>
             {
-                lua.GetGlobal("enumMemoryRegions");
-                if (!lua.IsFunction(-1))
+                int initialTop = lua.GetTop();
+                try
                 {
-                    lua.Pop(1);
-                    throw new InvalidOperationException("enumMemoryRegions function not available");
-                }
+                    lua.GetGlobal("enumMemoryRegions");
+                    if (!lua.IsFunction(-1))
+                        throw new InvalidOperationException("enumMemoryRegions function not available");
 
-                var result = lua.PCall(0, 1);
-                if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"enumMemoryRegions() failed: {error}");
-                }
+                    int result = lua.PCall(0, 1);
+                    if (result != 0)
+                        throw new InvalidOperationException($"enumMemoryRegions() failed: {lua.ToString(-1)}");
+                    if (!lua.IsTable(-1))
+                        throw new InvalidOperationException("enumMemoryRegions did not return a table");
 
-                var regions = new List<MemoryRegion>();
-                if (!lua.IsTable(-1))
-                {
-                    lua.Pop(1);
+                    var regions = new List<MemoryRegion>();
+                    lua.PushNil();
+                    while (lua.Next(-2) != 0)
+                    {
+                        try
+                        {
+                            if (!lua.IsTable(-1))
+                                throw new InvalidOperationException("enumMemoryRegions returned an invalid entry");
+
+                            regions.Add(new MemoryRegion
+                            {
+                                BaseAddress = GetTableUlong(-1, "BaseAddress"),
+                                AllocationBase = GetTableUlong(-1, "AllocationBase"),
+                                AllocationProtect = GetTableInt(-1, "AllocationProtect"),
+                                RegionSize = GetTableUlong(-1, "RegionSize"),
+                                State = GetTableInt(-1, "State"),
+                                Protect = GetTableInt(-1, "Protect"),
+                                Type = GetTableInt(-1, "Type")
+                            });
+                        }
+                        finally
+                        {
+                            lua.Pop(1);
+                        }
+                    }
                     return regions;
                 }
-
-                lua.PushNil();
-                while (lua.Next(-2) != 0)
+                finally
                 {
-                    if (lua.IsTable(-1))
-                    {
-                        var region = new MemoryRegion
-                        {
-                            BaseAddress = GetTableUlong(-1, "BaseAddress"),
-                            AllocationBase = GetTableUlong(-1, "AllocationBase"),
-                            AllocationProtect = GetTableInt(-1, "AllocationProtect"),
-                            RegionSize = GetTableUlong(-1, "RegionSize"),
-                            State = GetTableInt(-1, "State"),
-                            Protect = GetTableInt(-1, "Protect"),
-                            Type = GetTableInt(-1, "Type")
-                        };
-                        regions.Add(region);
-                    }
-                    lua.Pop(1);
+                    lua.SetTop(initialTop);
                 }
-
-                lua.Pop(1);
-                return regions;
             });
         }
 
@@ -94,43 +94,38 @@ namespace CESDK.Classes
         {
             return WrapException(() =>
             {
-                lua.GetGlobal("getMemoryProtection");
-                if (!lua.IsFunction(-1))
+                int initialTop = lua.GetTop();
+                try
                 {
-                    lua.Pop(1);
-                    throw new InvalidOperationException("getMemoryProtection function not available");
-                }
+                    lua.GetGlobal("getMemoryProtection");
+                    if (!lua.IsFunction(-1))
+                        throw new InvalidOperationException("getMemoryProtection function not available");
 
-                lua.PushInteger((long)address);
-                var result = lua.PCall(1, 1);
-                if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"getMemoryProtection() failed: {error}");
-                }
+                    lua.PushInteger((long)address);
+                    int result = lua.PCall(1, 1);
+                    if (result != 0)
+                        throw new InvalidOperationException($"getMemoryProtection() failed: {lua.ToString(-1)}");
+                    if (!lua.IsTable(-1))
+                        throw new InvalidOperationException($"No memory protection is available at 0x{address:X}");
 
-                var prot = new MemoryProtection
+                    return new MemoryProtection
+                    {
+                        Read = GetTableBool(-1, "r"),
+                        Write = GetTableBool(-1, "w"),
+                        Execute = GetTableBool(-1, "x")
+                    };
+                }
+                finally
                 {
-                    Read = GetTableBool(-1, "r"),
-                    Write = GetTableBool(-1, "w"),
-                    Execute = GetTableBool(-1, "x")
-                };
-                lua.Pop(1);
-                return prot;
+                    lua.SetTop(initialTop);
+                }
             });
         }
-
-        /// <summary>
-        /// Changes memory protection to writable and executable.
-        /// </summary>
-        public static void FullAccess(ulong address, int size) =>
-            WrapException(() => LuaUtils.CallVoidLuaFunction("fullAccess", $"set full access at 0x{address:X}", address, size));
 
         private static ulong GetTableUlong(int tableIndex, string key)
         {
             lua.GetField(tableIndex, key);
-            var value = lua.IsNumber(-1) ? (ulong)lua.ToInteger(-1) : 0UL;
+            var value = lua.IsNumber(-1) ? (ulong)lua.ToInteger64(-1) : 0UL;
             lua.Pop(1);
             return value;
         }

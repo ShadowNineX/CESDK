@@ -15,7 +15,7 @@ namespace CESDK.Classes
     {
         public string Name { get; init; } = "";
         public ulong Address { get; init; }
-        public int Size { get; init; }
+        public ulong Size { get; init; }
         public bool Is64Bit { get; init; }
         public string PathToFile { get; init; } = "";
     }
@@ -25,7 +25,7 @@ namespace CESDK.Classes
         public string ModuleName { get; init; } = "";
         public string SearchKey { get; init; } = "";
         public ulong Address { get; init; }
-        public int Size { get; init; }
+        public ulong Size { get; init; }
     }
 
     public static class SymbolManager
@@ -39,57 +39,62 @@ namespace CESDK.Classes
         {
             return WrapException(() =>
             {
-                lua.GetGlobal("enumModules");
-                if (!lua.IsFunction(-1))
+                int initialTop = lua.GetTop();
+                try
                 {
-                    lua.Pop(1);
-                    throw new InvalidOperationException("enumModules function not available");
-                }
+                    lua.GetGlobal("enumModules");
+                    if (!lua.IsFunction(-1))
+                        throw new InvalidOperationException("enumModules function not available");
 
-                var result = lua.PCall(0, 1);
-                if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"enumModules() failed: {error}");
-                }
+                    int result = lua.PCall(0, 1);
+                    if (result != 0)
+                        throw new InvalidOperationException($"enumModules() failed: {lua.ToString(-1)}");
+                    if (!lua.IsTable(-1))
+                        throw new InvalidOperationException("enumModules did not return a table");
 
-                var modules = new List<ModuleInfo>();
-                if (!lua.IsTable(-1))
-                {
-                    lua.Pop(1);
+                    var modules = new List<ModuleInfo>();
+                    lua.PushNil();
+                    while (lua.Next(-2) != 0)
+                    {
+                        try
+                        {
+                            if (!lua.IsTable(-1))
+                                throw new InvalidOperationException("enumModules returned an invalid entry");
+
+                            modules.Add(new ModuleInfo
+                            {
+                                Name = GetTableString(-1, "Name"),
+                                Address = GetTableUlong(-1, "Address"),
+                                Size = GetTableUlong(-1, "Size"),
+                                Is64Bit = GetTableBool(-1, "Is64Bit"),
+                                PathToFile = GetTableString(-1, "PathToFile")
+                            });
+                        }
+                        finally
+                        {
+                            lua.Pop(1);
+                        }
+                    }
                     return modules;
                 }
-
-                lua.PushNil();
-                while (lua.Next(-2) != 0)
+                finally
                 {
-                    if (lua.IsTable(-1))
-                    {
-                        var module = new ModuleInfo
-                        {
-                            Name = GetTableString(-1, "Name"),
-                            Address = GetTableUlong(-1, "Address"),
-                            Size = GetTableInt(-1, "Size"),
-                            Is64Bit = GetTableBool(-1, "Is64Bit"),
-                            PathToFile = GetTableString(-1, "PathToFile")
-                        };
-                        modules.Add(module);
-                    }
-                    lua.Pop(1);
+                    lua.SetTop(initialTop);
                 }
-
-                lua.Pop(1);
-                return modules;
             });
         }
 
         /// <summary>
         /// Returns the size of a given module.
         /// </summary>
-        public static int GetModuleSize(string moduleName) =>
+        public static ulong GetModuleSize(string moduleName) =>
             WrapException(() => LuaUtils.CallLuaFunction("getModuleSize", $"get module size for '{moduleName}'",
-                () => lua.ToInteger(-1), moduleName));
+                () =>
+                {
+                    if (!lua.IsNumber(-1))
+                        throw new InvalidOperationException($"Module '{moduleName}' was not found");
+                    return (ulong)lua.ToInteger64(-1);
+                }, moduleName));
 
         /// <summary>
         /// Returns symbol info for a given symbol name.
@@ -98,37 +103,34 @@ namespace CESDK.Classes
         {
             return WrapException(() =>
             {
-                lua.GetGlobal("getSymbolInfo");
-                if (!lua.IsFunction(-1))
+                int initialTop = lua.GetTop();
+                try
                 {
-                    lua.Pop(1);
-                    throw new InvalidOperationException("getSymbolInfo function not available");
-                }
+                    lua.GetGlobal("getSymbolInfo");
+                    if (!lua.IsFunction(-1))
+                        throw new InvalidOperationException("getSymbolInfo function not available");
 
-                lua.PushString(symbolName);
-                var result = lua.PCall(1, 1);
-                if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"getSymbolInfo() failed: {error}");
-                }
+                    lua.PushString(symbolName);
+                    int result = lua.PCall(1, 1);
+                    if (result != 0)
+                        throw new InvalidOperationException($"getSymbolInfo() failed: {lua.ToString(-1)}");
+                    if (lua.IsNil(-1))
+                        return null;
+                    if (!lua.IsTable(-1))
+                        throw new InvalidOperationException("getSymbolInfo returned an invalid value");
 
-                if (!lua.IsTable(-1))
-                {
-                    lua.Pop(1);
-                    return null;
+                    return new SymbolInfo
+                    {
+                        ModuleName = GetTableString(-1, "modulename"),
+                        SearchKey = GetTableString(-1, "searchkey"),
+                        Address = GetTableUlong(-1, "address"),
+                        Size = GetTableUlong(-1, "size")
+                    };
                 }
-
-                var info = new SymbolInfo
+                finally
                 {
-                    ModuleName = GetTableString(-1, "modulename"),
-                    SearchKey = GetTableString(-1, "searchkey"),
-                    Address = GetTableUlong(-1, "address"),
-                    Size = GetTableInt(-1, "size")
-                };
-                lua.Pop(1);
-                return info;
+                    lua.SetTop(initialTop);
+                }
             });
         }
 
@@ -181,9 +183,14 @@ namespace CESDK.Classes
         private static ulong GetTableUlong(int tableIndex, string key)
         {
             lua.GetField(tableIndex, key);
-            var value = lua.IsNumber(-1) ? (ulong)lua.ToNumber(-1) : 0UL;
-            lua.Pop(1);
-            return value;
+            try
+            {
+                return lua.IsNumber(-1) ? (ulong)lua.ToInteger64(-1) : 0UL;
+            }
+            finally
+            {
+                lua.Pop(1);
+            }
         }
 
         private static int GetTableInt(int tableIndex, string key)

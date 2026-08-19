@@ -13,31 +13,31 @@ namespace CESDK.Classes
     {
         // Read methods for target process
         public static byte ReadByte(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readByte", $"read byte at 0x{address:X}", () => (byte)PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readByte", $"read byte at 0x{address:X}", () => (byte)PluginContext.Lua.ToInteger(-1), address);
 
         public static short ReadSmallInteger(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readSmallInteger", $"read small integer at 0x{address:X}", () => (short)PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readSmallInteger", $"read small integer at 0x{address:X}", () => (short)PluginContext.Lua.ToInteger(-1), address);
 
         public static int ReadInteger(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readInteger", $"read integer at 0x{address:X}", () => PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readInteger", $"read integer at 0x{address:X}", () => PluginContext.Lua.ToInteger(-1), address);
 
         public static long ReadQword(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readQword", $"read qword at 0x{address:X}", () => PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readQword", $"read qword at 0x{address:X}", () => PluginContext.Lua.ToInteger64(-1), address);
 
         public static ulong ReadPointer(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readPointer", $"read pointer at 0x{address:X}", () => (ulong)PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readPointer", $"read pointer at 0x{address:X}", () => (ulong)PluginContext.Lua.ToInteger64(-1), address);
 
         public static float ReadFloat(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readFloat", $"read float at 0x{address:X}", () => (float)PluginContext.Lua.ToNumber(-1), address));
+            ReadRequired("readFloat", $"read float at 0x{address:X}", () => (float)PluginContext.Lua.ToNumber(-1), address);
 
         public static double ReadDouble(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readDouble", $"read double at 0x{address:X}", () => PluginContext.Lua.ToNumber(-1), address));
+            ReadRequired("readDouble", $"read double at 0x{address:X}", () => PluginContext.Lua.ToNumber(-1), address);
 
         public static string ReadString(ulong address, int maxLength = 1000, bool isWideChar = false) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readString", $"read string at 0x{address:X}", () => PluginContext.Lua.ToString(-1) ?? "", address, maxLength, isWideChar));
+            ReadRequired("readString", $"read string at 0x{address:X}", () => PluginContext.Lua.ToString(-1)!, address, maxLength, isWideChar);
 
-        public static byte[] ReadBytes(ulong address, int count, bool returnAsTable = true) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readBytes", $"read {count} bytes at 0x{address:X}", LuaUtils.ExtractBytesFromTable, address, count, returnAsTable));
+        public static byte[] ReadBytes(ulong address, int count) =>
+            ReadRequired("readBytes", $"read {count} bytes at 0x{address:X}", LuaUtils.ExtractBytesFromTable, address, count, true);
 
         // Write methods for target process
         public static bool WriteByte(ulong address, byte value) =>
@@ -66,28 +66,28 @@ namespace CESDK.Classes
 
         // Local CE memory read methods
         public static short ReadSmallIntegerLocal(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readSmallIntegerLocal", $"read local small integer at 0x{address:X}", () => (short)PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readSmallIntegerLocal", $"read local small integer at 0x{address:X}", () => (short)PluginContext.Lua.ToInteger(-1), address);
 
         public static int ReadIntegerLocal(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readIntegerLocal", $"read local integer at 0x{address:X}", () => PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readIntegerLocal", $"read local integer at 0x{address:X}", () => PluginContext.Lua.ToInteger(-1), address);
 
         public static long ReadQwordLocal(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readQwordLocal", $"read local qword at 0x{address:X}", () => PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readQwordLocal", $"read local qword at 0x{address:X}", () => PluginContext.Lua.ToInteger64(-1), address);
 
         public static ulong ReadPointerLocal(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readPointerLocal", $"read local pointer at 0x{address:X}", () => (ulong)PluginContext.Lua.ToInteger(-1), address));
+            ReadRequired("readPointerLocal", $"read local pointer at 0x{address:X}", () => (ulong)PluginContext.Lua.ToInteger64(-1), address);
 
         public static float ReadFloatLocal(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readFloatLocal", $"read local float at 0x{address:X}", () => (float)PluginContext.Lua.ToNumber(-1), address));
+            ReadRequired("readFloatLocal", $"read local float at 0x{address:X}", () => (float)PluginContext.Lua.ToNumber(-1), address);
 
         public static double ReadDoubleLocal(ulong address) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readDoubleLocal", $"read local double at 0x{address:X}", () => PluginContext.Lua.ToNumber(-1), address));
+            ReadRequired("readDoubleLocal", $"read local double at 0x{address:X}", () => PluginContext.Lua.ToNumber(-1), address);
 
         public static string ReadStringLocal(ulong address, int maxLength = 1000, bool isWideChar = false) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readStringLocal", $"read local string at 0x{address:X}", () => PluginContext.Lua.ToString(-1) ?? "", address, maxLength, isWideChar));
+            ReadRequired("readStringLocal", $"read local string at 0x{address:X}", () => PluginContext.Lua.ToString(-1)!, address, maxLength, isWideChar);
 
-        public static byte[] ReadBytesLocal(ulong address, int count, bool returnAsTable = true) =>
-            WrapException(() => LuaUtils.CallLuaFunction("readBytesLocal", $"read local {count} bytes at 0x{address:X}", LuaUtils.ExtractBytesFromTable, address, count, returnAsTable));
+        public static byte[] ReadBytesLocal(ulong address, int count) =>
+            ReadRequired("readBytesLocal", $"read local {count} bytes at 0x{address:X}", LuaUtils.ExtractBytesFromTable, address, count, true);
 
         // Local CE memory write methods
         public static bool WriteSmallIntegerLocal(ulong address, short value) =>
@@ -110,6 +110,18 @@ namespace CESDK.Classes
 
         public static bool WriteBytesLocal(ulong address, byte[] bytes) =>
             WrapException(() => LuaUtils.CallLuaFunction("writeBytesLocal", $"write local {bytes.Length} bytes at 0x{address:X}", () => PluginContext.Lua.ToBoolean(-1), address, bytes));
+
+        private static T ReadRequired<T>(string functionName, string operationName, Func<T> extractor, params object?[] args) =>
+            WrapException(() => LuaUtils.CallLuaFunction(
+                functionName,
+                operationName,
+                () =>
+                {
+                    if (PluginContext.Lua.IsNil(-1))
+                        throw new InvalidOperationException($"{functionName} returned nil");
+                    return extractor();
+                },
+                args));
 
         private static T WrapException<T>(Func<T> operation)
         {

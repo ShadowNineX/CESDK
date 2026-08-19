@@ -18,4 +18,8 @@
   <ItemGroup>
     <Compile Include="..\..\src\**\*.cs" LinkBase="CESDK" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NLog" Version="6.1.4" />
+  </ItemGroup>
 </Project>

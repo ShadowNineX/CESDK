@@ -445,7 +445,8 @@ namespace CESDK.Lua
             if (function == null)
                 throw new ArgumentNullException(nameof(function));
 
-            _keepAlive.Add(function);
+            if (!_keepAlive.Contains(function))
+                _keepAlive.Add(function);
             var functionPtr = Marshal.GetFunctionPointerForDelegate(function);
             _pushCFunction(LuaState, functionPtr, 0);
         }
@@ -529,6 +530,14 @@ namespace CESDK.Lua
         /// Numbers and numeric strings are converted to integers. Other types return 0.
         /// </remarks>
         public int ToInteger(int index) => (int)_toInteger(LuaState, index, IntPtr.Zero);
+
+        /// <summary>
+        /// Converts the value at the specified index to a signed 64-bit integer.
+        /// Use this for addresses, pointers, sizes, and register values on 64-bit targets.
+        /// </summary>
+        /// <param name="index">The stack index of the value to convert.</param>
+        /// <returns>The 64-bit integer value, or 0 if conversion fails.</returns>
+        public long ToInteger64(int index) => _toInteger(LuaState, index, IntPtr.Zero);
 
         /// <summary>
         /// Converts the value at the specified index to a floating-point number.

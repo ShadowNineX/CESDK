@@ -45,7 +45,7 @@ namespace CESDK.Classes
         /// </summary>
         public static ulong GetPreviousOpcode(ulong address) =>
             WrapException(() => LuaUtils.CallLuaFunction("getPreviousOpcode", $"get previous opcode at 0x{address:X}",
-                () => (ulong)lua.ToInteger(-1), address));
+                () => (ulong)lua.ToInteger64(-1), address));
 
         /// <summary>
         /// Splits a disassembled string into its components: address, bytes, opcode, extra.
@@ -54,31 +54,30 @@ namespace CESDK.Classes
         {
             return WrapException(() =>
             {
-                lua.GetGlobal("splitDisassembledString");
-                if (!lua.IsFunction(-1))
+                int initialTop = lua.GetTop();
+                try
                 {
-                    lua.Pop(1);
-                    throw new InvalidOperationException("splitDisassembledString function not available");
-                }
+                    lua.GetGlobal("splitDisassembledString");
+                    if (!lua.IsFunction(-1))
+                        throw new InvalidOperationException("splitDisassembledString function not available");
 
-                lua.PushString(disassembledString);
-                var result = lua.PCall(1, 4);
-                if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"splitDisassembledString() failed: {error}");
-                }
+                    lua.PushString(disassembledString);
+                    int result = lua.PCall(1, 4);
+                    if (result != 0)
+                        throw new InvalidOperationException($"splitDisassembledString() failed: {lua.ToString(-1)}");
 
-                var instruction = new DisassembledInstruction
+                    return new DisassembledInstruction
+                    {
+                        Address = lua.ToString(-4) ?? "",
+                        Bytes = lua.ToString(-3) ?? "",
+                        Opcode = lua.ToString(-2) ?? "",
+                        Extra = lua.ToString(-1) ?? ""
+                    };
+                }
+                finally
                 {
-                    Address = lua.ToString(-4) ?? "",
-                    Bytes = lua.ToString(-3) ?? "",
-                    Opcode = lua.ToString(-2) ?? "",
-                    Extra = lua.ToString(-1) ?? ""
-                };
-                lua.Pop(4);
-                return instruction;
+                    lua.SetTop(initialTop);
+                }
             });
         }
 
@@ -96,26 +95,26 @@ namespace CESDK.Classes
         {
             return WrapException(() =>
             {
-                lua.GetGlobal("getFunctionRange");
-                if (!lua.IsFunction(-1))
+                int initialTop = lua.GetTop();
+                try
                 {
-                    lua.Pop(1);
-                    throw new InvalidOperationException("getFunctionRange function not available");
-                }
+                    lua.GetGlobal("getFunctionRange");
+                    if (!lua.IsFunction(-1))
+                        throw new InvalidOperationException("getFunctionRange function not available");
 
-                lua.PushInteger((long)address);
-                var result = lua.PCall(1, 2);
-                if (result != 0)
+                    lua.PushInteger((long)address);
+                    int result = lua.PCall(1, 2);
+                    if (result != 0)
+                        throw new InvalidOperationException($"getFunctionRange() failed: {lua.ToString(-1)}");
+                    if (!lua.IsNumber(-2) || !lua.IsNumber(-1))
+                        throw new InvalidOperationException($"No function range was found for 0x{address:X}");
+
+                    return ((ulong)lua.ToInteger64(-2), (ulong)lua.ToInteger64(-1));
+                }
+                finally
                 {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new InvalidOperationException($"getFunctionRange() failed: {error}");
+                    lua.SetTop(initialTop);
                 }
-
-                var start = (ulong)lua.ToInteger(-2);
-                var end = (ulong)lua.ToInteger(-1);
-                lua.Pop(2);
-                return (start, end);
             });
         }
 

@@ -38,23 +38,26 @@ namespace CESDK.Classes
         /// </summary>
         private void CreateFoundListFromMemScan(MemScan memScan)
         {
+            int initialTop = lua.GetTop();
             try
             {
                 lua.GetGlobal("createFoundList");
-                if (lua.IsNil(-1))
-                    throw new FoundListException("You have no createFoundList (WTF)");
+                if (!lua.IsFunction(-1))
+                    throw new FoundListException("createFoundList function not available");
 
                 lua.PushCEObject(memScan.obj);
-                lua.PCall(1, 1);
+                int result = lua.PCall(1, 1);
+                if (result != 0)
+                    throw new FoundListException($"createFoundList() call failed: {lua.ToString(-1)}");
 
-                if (lua.IsCEObject(-1))
-                    CEObject = lua.ToCEObject(-1);
-                else
-                    throw new FoundListException("No idea what createFoundList returned");
+                if (!lua.IsCEObject(-1))
+                    throw new FoundListException("createFoundList did not return a FoundList object");
+
+                CEObject = lua.ToCEObject(-1);
             }
             finally
             {
-                lua.SetTop(0);
+                lua.SetTop(initialTop);
             }
         }
 
@@ -72,38 +75,14 @@ namespace CESDK.Classes
         private void EnsureFoundListObject()
         {
             if (CEObject == IntPtr.Zero)
-                throw new FoundListException("FoundList object not properly initialized. Use MemScan.GetAttachedFoundList() to get a valid FoundList.");
-        }
-
-        /// <summary>
-        /// Pushes the FoundList CE object onto the Lua stack
-        /// </summary>
-        private void PushFoundListObject()
-        {
-            EnsureFoundListObject();
-            PushCEObject();
+                throw new FoundListException("FoundList object is not initialized");
         }
 
         public void Initialize()
         {
-            try
-            {
-                lua.PushCEObject(CEObject);
-
-                lua.PushString("initialize");
-                lua.GetTable(-2);
-
-                if (!lua.IsFunction(-1))
-                    throw new FoundListException("foundlist with no initialize method");
-
-                lua.PushValue(-2); // Push self (FoundList object)
-                lua.PCall(1, 0); // Call with self as argument
-                _initialized = true;
-            }
-            finally
-            {
-                lua.SetTop(0);
-            }
+            EnsureFoundListObject();
+            CallMethod("initialize");
+            _initialized = true;
         }
 
         /// <summary>
@@ -119,113 +98,47 @@ namespace CESDK.Classes
         /// <summary>
         /// Gets the number of results found
         /// </summary>
-        public int Count { get { return GetCount(); } }
-
-        int GetCount()
-        {
-            try
+        public int Count => CallMethod(
+            "getCount",
+            () => { },
+            0,
+            () =>
             {
-                lua.PushCEObject(CEObject);
-                lua.PushString("getCount");
-                lua.GetTable(-2);
-
-                if (!lua.IsFunction(-1))
-                {
-                    // Fallback to Count property
-                    lua.Pop(1);
-                    lua.PushString("Count");
-                    lua.GetTable(-2);
-                    return lua.ToInteger(-1);
-                }
-
-                lua.PushValue(-2); // Push self
-                lua.PCall(1, 1);
+                if (!lua.IsNumber(-1))
+                    throw new FoundListException("getCount did not return an integer");
                 return lua.ToInteger(-1);
-            }
-            finally
-            {
-                lua.SetTop(0);
-            }
-        }
+            });
 
-        public string GetAddress(int i)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.PushString("getAddress");
-                lua.GetTable(-2);
+        public string GetAddress(int index) =>
+            CallMethod(
+                "getAddress",
+                () => lua.PushInteger(index),
+                1,
+                () => ReadRequiredString($"getAddress returned no address for index {index}"));
 
-                if (!lua.IsFunction(-1))
-                    throw new FoundListException("foundlist with no getAddress method");
-
-                lua.PushValue(-2); // Push self
-                lua.PushInteger(i);
-                lua.PCall(2, 1);
-                return lua.ToString(-1) ?? "";
-            }
-            finally
-            {
-                lua.SetTop(0);
-            }
-        }
-
-        public string GetValue(int i)
-        {
-            try
-            {
-                lua.PushCEObject(CEObject);
-                lua.PushString("getValue");
-                lua.GetTable(-2);
-
-                if (!lua.IsFunction(-1))
-                    throw new FoundListException("foundlist with no getValue method");
-
-                lua.PushValue(-2); // Push self
-                lua.PushInteger(i);
-                lua.PCall(2, 1);
-                return lua.ToString(-1) ?? "";
-            }
-            finally
-            {
-                lua.SetTop(0);
-            }
-        }
+        public string GetValue(int index) =>
+            CallMethod(
+                "getValue",
+                () => lua.PushInteger(index),
+                1,
+                () => ReadRequiredString($"getValue returned no value for index {index}"));
 
         /// <summary>
         /// Indexer for address access. According to celua.txt: foundlist[index] returns address
         /// </summary>
         /// <param name="index">Index (0-based)</param>
         /// <returns>Address as string</returns>
-        public string this[int index]
+        public string this[int index] =>
+            GetIndexedProperty(
+                "Address",
+                index,
+                () => ReadRequiredString($"FoundList has no address at index {index}"));
+
+        private string ReadRequiredString(string error)
         {
-            get
-            {
-                try
-                {
-                    PushFoundListObject();
-
-                    // Try direct indexer access
-                    lua.PushInteger(index);
-                    lua.GetTable(-2);
-
-                    if (!lua.IsNil(-1))
-                    {
-                        var address = lua.ToString(-1);
-                        lua.Pop(2); // Pop address and FoundList object
-                        return address ?? "";
-                    }
-
-                    lua.Pop(2); // Pop nil and FoundList object
-
-                    // Fallback to GetAddress method
-                    return GetAddress(index);
-                }
-                catch (Exception ex) when (ex is not FoundListException)
-                {
-                    throw new FoundListException($"Failed to get item at index {index}", ex);
-                }
-            }
+            if (!lua.IsString(-1))
+                throw new FoundListException(error);
+            return lua.ToString(-1) ?? "";
         }
 
         /// <summary>

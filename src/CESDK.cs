@@ -23,6 +23,13 @@ namespace CESDK
         private const int PLUGIN_VERSION = 6;
         private static CESDK? mainSelf;
         private static CheatEnginePlugin? _currentPlugin;
+        private static readonly object SynchronizeLock = new();
+        private static Action? synchronizedAction;
+        private static readonly LuaNative.LuaCFunction SynchronizeCallback = _ =>
+        {
+            synchronizedAction?.Invoke();
+            return 0;
+        };
         public static CheatEnginePlugin? CurrentPlugin => _currentPlugin;
 
         private TExportedFunctions pluginExports;
@@ -153,35 +160,37 @@ namespace CESDK
         /// <param name="action">The action to execute on the GUI thread</param>
         public static void Synchronize(Action action)
         {
-            var lua = PluginContext.Lua;
-            Exception? caughtException = null;
-
-            // Register a temporary Lua function that will call our action
-            lua.RegisterFunction("__cesdk_sync_callback", () =>
+            lock (SynchronizeLock)
             {
+                var lua = PluginContext.Lua;
+                Exception? caughtException = null;
+                synchronizedAction = () =>
+                {
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        caughtException = ex;
+                    }
+                };
+
                 try
                 {
-                    action();
+                    lua.PushCFunction(SynchronizeCallback);
+                    lua.SetGlobal("__cesdk_sync_callback");
+                    lua.DoString("synchronize(__cesdk_sync_callback)");
+
+                    if (caughtException != null)
+                        throw caughtException;
                 }
-                catch (Exception ex)
+                finally
                 {
-                    caughtException = ex;
+                    synchronizedAction = null;
+                    lua.PushNil();
+                    lua.SetGlobal("__cesdk_sync_callback");
                 }
-            });
-
-            try
-            {
-                // Call synchronize with our callback
-                lua.DoString("synchronize(__cesdk_sync_callback)");
-
-                // If the action threw an exception, rethrow it
-                if (caughtException != null)
-                    throw caughtException;
-            }
-            finally
-            {
-                // Clean up the global function
-                lua.DoString("__cesdk_sync_callback = nil");
             }
         }
 
@@ -244,17 +253,7 @@ namespace CESDK
             }
             catch (Exception ex)
             {
-                try
-                {
-                    PluginLogger.LogException(ex);
-                }
-                catch (Exception)
-                {
-                    // Logger failed, will use console fallback below
-                }
-
-                Console.WriteLine("CEPluginInitialize Exception:");
-                Console.WriteLine(ex.ToString());
+                PluginLogger.LogException(ex);
                 return 0;
             }
         }

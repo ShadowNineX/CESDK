@@ -26,9 +26,13 @@ namespace CESDK.Classes
         /// debugInterface: 0=default, 1=windows, 2=VEH, 3=kernel.
         /// </summary>
         public static void DebugProcess(int debugInterface = 0) =>
-            WrapException(() => LuaUtils.CallVoidLuaFunctionWithOptionalParams(
-                "debugProcess", "start debugging process",
-                debugInterface == 0 ? null : debugInterface));
+            WrapException(() =>
+            {
+                if (debugInterface == 0)
+                    LuaUtils.CallVoidLuaFunction("debugProcess", "start debugging process");
+                else
+                    LuaUtils.CallVoidLuaFunction("debugProcess", "start debugging process", debugInterface);
+            });
 
         /// <summary>Detaches the debugger if possible.</summary>
         public static void DetachIfPossible() =>
@@ -70,41 +74,47 @@ namespace CESDK.Classes
                 "isPaused", "check if paused", () => lua.ToBoolean(-1)));
 
         /// <summary>
-        /// Returns the current debugger interface: 1=windows, 2=VEH, 3=kernel, null=none.
+        /// Returns the current debugger interface: 1=Windows, 2=VEH, 3=kernel,
+        /// 4=macOS native, 5=GDB, or null when no debugger is active.
         /// </summary>
         public static int? GetCurrentDebuggerInterface() =>
-            WrapException(() =>
-            {
-                lua.GetGlobal("debug_getCurrentDebuggerInterface");
-                if (!lua.IsFunction(-1)) { lua.Pop(1); return (int?)null; }
-                lua.PCall(0, 1);
-                var result = lua.IsNil(-1) ? (int?)null : (int?)lua.ToInteger(-1);
-                lua.Pop(1);
-                return result;
-            });
+            WrapException(() => LuaUtils.CallLuaFunction(
+                "debug_getCurrentDebuggerInterface",
+                "get current debugger interface",
+                () => lua.IsNil(-1) ? (int?)null : lua.ToInteger(-1)));
 
         // ── Breakpoints ──────────────────────────────────────────────────────
 
         /// <summary>Returns a list of all active breakpoint addresses.</summary>
         public static List<ulong> GetBreakpointList() =>
-            WrapException(() =>
-            {
-                lua.GetGlobal("debug_getBreakpointList");
-                if (!lua.IsFunction(-1)) { lua.Pop(1); return []; }
-                lua.PCall(0, 1);
-                var list = new List<ulong>();
-                if (lua.IsTable(-1))
+            WrapException(() => LuaUtils.CallLuaFunction(
+                "debug_getBreakpointList",
+                "get breakpoint list",
+                () =>
                 {
+                    if (lua.IsNil(-1))
+                        return [];
+
+                    if (!lua.IsTable(-1))
+                        throw new InvalidOperationException("debug_getBreakpointList did not return a table");
+
+                    var list = new List<ulong>();
                     lua.PushNil();
                     while (lua.Next(-2) != 0)
                     {
-                        list.Add((ulong)lua.ToInteger(-1));
-                        lua.Pop(1);
+                        try
+                        {
+                            if (!lua.IsNumber(-1))
+                                throw new InvalidOperationException("Breakpoint list contains a non-address value");
+                            list.Add((ulong)lua.ToInteger64(-1));
+                        }
+                        finally
+                        {
+                            lua.Pop(1);
+                        }
                     }
-                }
-                lua.Pop(1);
-                return list;
-            });
+                    return list;
+                }));
 
         /// <summary>
         /// Sets a breakpoint at the given address without a callback (breaking breakpoint).
@@ -112,15 +122,7 @@ namespace CESDK.Classes
         /// For bptExecute, size is ignored. For bptWrite/bptAccess, size is the watch size in bytes.
         /// </summary>
         public static void SetBreakpoint(ulong address, int size = 1, string trigger = "bptExecute") =>
-            WrapException(() =>
-            {
-                lua.GetGlobal("debug_setBreakpoint");
-                if (!lua.IsFunction(-1)) { lua.Pop(1); throw new InvalidOperationException("debug_setBreakpoint not available"); }
-                lua.PushInteger((long)address);
-                lua.PushInteger(size);
-                lua.GetGlobal(trigger);   // push the CE constant (bptExecute / bptWrite / bptAccess)
-                lua.PCall(3, 0);
-            });
+            SetBreakpointCore("debug_setBreakpoint", null, address, size, trigger);
 
         /// <summary>Removes the breakpoint at the given address.</summary>
         public static void RemoveBreakpoint(ulong address) =>
@@ -136,10 +138,21 @@ namespace CESDK.Classes
         public static void ContinueFromBreakpoint(string method = "co_run") =>
             WrapException(() =>
             {
-                lua.GetGlobal("debug_continueFromBreakpoint");
-                if (!lua.IsFunction(-1)) { lua.Pop(1); throw new InvalidOperationException("debug_continueFromBreakpoint not available"); }
-                lua.GetGlobal(method);    // push CE constant co_run / co_stepinto / co_stepover
-                lua.PCall(1, 0);
+                int initialTop = lua.GetTop();
+                try
+                {
+                    lua.GetGlobal("debug_continueFromBreakpoint");
+                    if (!lua.IsFunction(-1))
+                        throw new InvalidOperationException("debug_continueFromBreakpoint function not available");
+                    PushRequiredGlobal(method);
+                    int result = lua.PCall(1, 0);
+                    if (result != 0)
+                        throw new InvalidOperationException($"debug_continueFromBreakpoint() failed: {lua.ToString(-1)}");
+                }
+                finally
+                {
+                    lua.SetTop(initialTop);
+                }
             });
 
         // ── Context / Registers ──────────────────────────────────────────────
@@ -171,10 +184,18 @@ namespace CESDK.Classes
         public static ulong GetRegister(string name) =>
             WrapException(() =>
             {
-                lua.GetGlobal(name);
-                var val = (ulong)lua.ToInteger(-1);
-                lua.Pop(1);
-                return val;
+                int initialTop = lua.GetTop();
+                try
+                {
+                    lua.GetGlobal(name);
+                    if (!lua.IsNumber(-1))
+                        throw new InvalidOperationException($"Register '{name}' is not available");
+                    return (ulong)lua.ToInteger64(-1);
+                }
+                finally
+                {
+                    lua.SetTop(initialTop);
+                }
             });
 
         /// <summary>
@@ -187,6 +208,65 @@ namespace CESDK.Classes
                 lua.SetGlobal(name);
             });
 
+        /// <summary>Requests that the debugger break a specific target thread.</summary>
+        public static void BreakThread(int threadId) =>
+            WrapException(() => LuaUtils.CallVoidLuaFunction(
+                "debug_breakThread", "break target thread", threadId));
+
+        /// <summary>Excludes a target thread from breakpoint handling.</summary>
+        public static void AddThreadToNoBreakList(int threadId) =>
+            WrapException(() => LuaUtils.CallVoidLuaFunction(
+                "debug_addThreadToNoBreakList", "exclude thread from breakpoints", threadId));
+
+        /// <summary>Removes a target thread from the breakpoint exclusion list.</summary>
+        public static void RemoveThreadFromNoBreakList(int threadId) =>
+            WrapException(() => LuaUtils.CallVoidLuaFunction(
+                "debug_removeThreadFromNoBreakList", "include thread in breakpoints", threadId));
+
+        /// <summary>Sets a breakpoint that only applies to one target thread.</summary>
+        public static void SetBreakpointForThread(
+            int threadId,
+            ulong address,
+            int size = 1,
+            string trigger = "bptExecute") =>
+            SetBreakpointCore("debug_setBreakpointForThread", threadId, address, size, trigger);
+
+        /// <summary>Returns the local Cheat Engine address of an XMM register.</summary>
+        public static ulong GetXmmPointer(int register) =>
+            WrapException(() => LuaUtils.CallLuaFunction(
+                "debug_getXMMPointer",
+                "get XMM register pointer",
+                () => (ulong)lua.ToInteger64(-1),
+                register));
+
+        /// <summary>Returns the current broken-thread context as a Lua table.</summary>
+        public static object? GetCurrentContextTable(bool extraRegisters = false) =>
+            WrapException(() => LuaUtils.CallLuaFunction(
+                "debug_getCurrentContextTable",
+                "get current debug context table",
+                () => LuaExecutor.ReadStackValue(-1),
+                extraRegisters));
+
+        /// <summary>Enables or disables CPU last-branch recording.</summary>
+        public static void SetLastBranchRecording(bool enabled) =>
+            WrapException(() => LuaUtils.CallVoidLuaFunction(
+                "debug_setLastBranchRecording", "set last branch recording", enabled));
+
+        /// <summary>Returns the maximum available last-branch record count.</summary>
+        public static int GetMaxLastBranchRecord() =>
+            WrapException(() => LuaUtils.CallLuaFunction(
+                "debug_getMaxLastBranchRecord",
+                "get maximum last branch record",
+                () => lua.ToInteger(-1)));
+
+        /// <summary>Returns one last-branch record address.</summary>
+        public static ulong GetLastBranchRecord(int index) =>
+            WrapException(() => LuaUtils.CallLuaFunction(
+                "debug_getLastBranchRecord",
+                "get last branch record",
+                () => (ulong)lua.ToInteger64(-1),
+                index));
+
         // ── Debug Output ─────────────────────────────────────────────────────
 
         /// <summary>Outputs a message via Windows OutputDebugString (readable with DebugView).</summary>
@@ -194,6 +274,50 @@ namespace CESDK.Classes
             WrapException(() => LuaUtils.CallVoidLuaFunction("outputDebugString", "output debug string", message));
 
         // ── Private helpers ──────────────────────────────────────────────────
+
+        private static void SetBreakpointCore(
+            string functionName,
+            int? threadId,
+            ulong address,
+            int size,
+            string trigger)
+        {
+            WrapException(() =>
+            {
+                int initialTop = lua.GetTop();
+                try
+                {
+                    lua.GetGlobal(functionName);
+                    if (!lua.IsFunction(-1))
+                        throw new InvalidOperationException($"{functionName} function not available");
+
+                    int argumentCount = 3;
+                    if (threadId.HasValue)
+                    {
+                        lua.PushInteger(threadId.Value);
+                        argumentCount++;
+                    }
+                    lua.PushInteger((long)address);
+                    lua.PushInteger(size);
+                    PushRequiredGlobal(trigger);
+
+                    int result = lua.PCall(argumentCount, 0);
+                    if (result != 0)
+                        throw new InvalidOperationException($"{functionName}() failed: {lua.ToString(-1)}");
+                }
+                finally
+                {
+                    lua.SetTop(initialTop);
+                }
+            });
+        }
+
+        private static void PushRequiredGlobal(string name)
+        {
+            lua.GetGlobal(name);
+            if (!lua.IsNumber(-1))
+                throw new InvalidOperationException($"Cheat Engine constant '{name}' is not available");
+        }
 
         private static void WrapException(Action operation)
         {

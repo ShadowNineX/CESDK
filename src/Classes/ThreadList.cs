@@ -29,75 +29,84 @@ namespace CESDK.Classes
         /// </summary>
         public void Refresh()
         {
+            int initialTop = lua.GetTop();
+            IntPtr stringList = IntPtr.Zero;
             try
             {
                 threadIds.Clear();
 
                 lua.GetGlobal("createStringlist");
                 if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(1);
-                    throw new ThreadListException("createStringlist function not available in this CE version");
-                }
+                    throw new ThreadListException("createStringlist function not available");
 
-                var result = lua.PCall(0, 1);
+                int result = lua.PCall(0, 1);
                 if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(1);
-                    throw new ThreadListException($"createStringlist() call failed: {error}");
-                }
+                    throw new ThreadListException($"createStringlist() call failed: {lua.ToString(-1)}");
+                if (!lua.IsCEObject(-1))
+                    throw new ThreadListException("createStringlist did not return a StringList object");
 
-                int stringListRef = lua.GetTop();
+                stringList = lua.ToCEObject(-1);
 
                 lua.GetGlobal("getThreadlist");
                 if (!lua.IsFunction(-1))
-                {
-                    lua.Pop(2);
-                    throw new ThreadListException("getThreadlist function not available in this CE version");
-                }
-
-                lua.PushValue(stringListRef);
-
+                    throw new ThreadListException("getThreadlist function not available");
+                lua.PushCEObject(stringList);
                 result = lua.PCall(1, 0);
                 if (result != 0)
-                {
-                    var error = lua.ToString(-1);
-                    lua.Pop(2);
-                    throw new ThreadListException($"getThreadlist() call failed: {error}");
-                }
+                    throw new ThreadListException($"getThreadlist() call failed: {lua.ToString(-1)}");
 
-                // Read the filled StringList
-                lua.PushValue(stringListRef);
+                lua.PushCEObject(stringList);
                 lua.GetField(-1, "Count");
-                if (!lua.IsInteger(-1))
-                {
-                    lua.Pop(2);
-                    throw new ThreadListException("Could not get Count property from StringList");
-                }
+                if (!lua.IsNumber(-1))
+                    throw new ThreadListException("StringList.Count is not an integer");
 
                 int count = lua.ToInteger(-1);
                 lua.Pop(1);
-
                 for (int i = 0; i < count; i++)
                 {
                     lua.PushInteger(i);
                     lua.GetTable(-2);
-
-                    if (lua.IsString(-1))
+                    try
                     {
-                        var threadId = lua.ToString(-1);
+                        if (!lua.IsString(-1))
+                            throw new ThreadListException($"StringList item {i} is not a thread ID");
+
+                        string threadId = lua.ToString(-1) ?? "";
                         if (!string.IsNullOrEmpty(threadId))
                             threadIds.Add(threadId);
                     }
-                    lua.Pop(1);
+                    finally
+                    {
+                        lua.Pop(1);
+                    }
                 }
-
-                lua.Pop(1); // Pop StringList object
             }
             catch (Exception ex) when (ex is not ThreadListException)
             {
                 throw new ThreadListException("Failed to load thread list", ex);
+            }
+            finally
+            {
+                lua.SetTop(initialTop);
+                if (stringList != IntPtr.Zero)
+                    DestroyStringList(stringList, initialTop);
+            }
+        }
+
+        private void DestroyStringList(IntPtr stringList, int initialTop)
+        {
+            try
+            {
+                lua.PushCEObject(stringList);
+                lua.GetField(-1, "destroy");
+                if (lua.IsFunction(-1))
+                {
+                    lua.PCall(0, 0);
+                }
+            }
+            finally
+            {
+                lua.SetTop(initialTop);
             }
         }
 
