@@ -1,97 +1,24 @@
-# CESDK - Cheat Engine SDK for C#
+# CESDK — Cheat Engine SDK for C#
 
-⚠️ **Work in Progress** ⚠️
-
-A C# wrapper library for developing plugins for Cheat Engine. Provides managed .NET interfaces for memory scanning, process manipulation, and reverse engineering tasks.
-
-## Status
+CESDK is a managed wrapper and plugin bootstrap for building Cheat Engine extensions in C#. It exposes typed facades over Cheat Engine's Lua API for processes, memory, scans, symbols, structures, address lists, assembly, debugging, injection, and optional DBVM operations.
 
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FShadowNineX%2FCESDK.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FShadowNineX%2FCESDK?ref=badge_shield)
 
-This project is currently WIP. Things might be missing.
-
-## Build
-
-```bash
-dotnet build
-```
-
-## Testing
-
-Tests live under `tests/` and are not referenced by `CESDK.csproj`, so they do not get packed into the CESDK NuGet package.
-
-Build the SDK and test projects:
-
-```bash
-dotnet build CESDK.sln
-dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filter "TestCategory!=Live"
-```
-
-The live CESDK tests run through a dedicated Cheat Engine plugin:
-
-1. Build `tests/CESDK.LiveTestPlugin/CESDK.LiveTestPlugin.csproj`.
-2. Load `tests/CESDK.LiveTestPlugin/bin/x64/Debug/net10.0-windows/cesdk-live-tests.dll` in Cheat Engine.
-3. Restart Cheat Engine and enable `CESDK Live Tests`.
-4. The plugin runs target-independent checks immediately. Target-dependent checks are reported as skipped—not failed—until a disposable process is attached.
-5. After attaching a process, choose `CESDK Tests` -> `Run Tests Against Attached Process`.
-6. Validate the generated report:
-
-```powershell
-$env:CESDK_LIVE = "1"
-dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filter TestCategory=Live
-```
-
-By default the plugin writes `%TEMP%\cesdk-live-tests-result.json`. Set `CESDK_LIVE_RESULT` before launching Cheat Engine and before running `dotnet test` to use a custom result path.
-
-The default live run is inspection-only. Full wrapper coverage allocates and writes target memory and temporarily mutates CE address-list, structure, symbol, and table state. Set `CESDK_LIVE_MUTATING=1` before launching Cheat Engine, attach a disposable Notepad or other test process, then use the `CESDK Tests` menu:
-
-```powershell
-$env:CESDK_LIVE_MUTATING = "1"
-& "C:\Program Files\Cheat Engine\cheatengine-x86_64.exe"
-# Attach a disposable target in CE.
-# Choose CESDK Tests -> Run Tests Against Attached Process.
-$env:CESDK_LIVE = "1"
-dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filter TestCategory=Live
-```
-
-For unattended startup, `CESDK_LIVE_TARGET_PID` remains supported: set it to a disposable target PID before launching CE and the plugin attaches that process automatically. The report records `AttachedTargetProcessId`; the validator requires target-dependent tests to execute whenever it is present.
-
-CESDK and ce-mcp write through NLog to one canonical file: `%APPDATA%\CeMCP\ce-mcp.log`. The file rolls at 10 MiB and retains five archives.
-
-## Install the API package
-
-NuGet package: https://www.nuget.org/packages/CESDK
-
-```bash
-dotnet add package CESDK
-```
-
-> **Plugin bootstrap note:** the current `CEPluginInitialize` implementation discovers
-> `CheatEnginePlugin` subclasses in the assembly containing the CESDK sources. A plugin
-> subclass compiled only in a separate assembly that references `CESDK.dll` is not
-> auto-discovered. For a Cheat Engine-loadable plugin, use the source-link project pattern
-> shown below; `tests/CESDK.LiveTestPlugin/CESDK.LiveTestPlugin.csproj` is the working
-> reference implementation.
+> [!IMPORTANT]
+> CESDK is under active development. Test plugins against the exact Cheat Engine version they will run on, and use that installation's `celua.txt` as the authoritative Lua API reference.
 
 ## Requirements
 
-- Windows
-- Cheat Engine 7.0 or later
-- A plugin architecture matching Cheat Engine (`x64` in the tested live-plugin project)
-- .NET SDK `10.0.102` to build this repository; the package itself targets `netstandard2.0`
+- Windows with the same architecture as Cheat Engine; the tested live plugin is x64.
+- Cheat Engine 7.6.2 or newer for managed plugin hosting.
+- .NET 10 SDK to build this repository. `global.json` pins the tested SDK feature band.
+- The published CESDK library targets `netstandard2.0`.
 
-## Usage
+## Quick Start
 
-### Create and register a plugin
+### 1. Create a plugin project
 
-CESDK registration is convention-based. Define exactly one non-abstract
-`CheatEnginePlugin` subclass in the same output assembly as the CESDK bootstrap.
-`CEPluginInitialize` creates the first subclass it finds, uses `Name` as the Cheat Engine
-plugin name, and calls `OnEnable`/`OnDisable` when Cheat Engine toggles the plugin. There is
-no separate registration call.
-
-The repository's live plugin compiles CESDK sources into the plugin assembly. A minimal
-project uses the same pattern (adjust the relative path to `src/`):
+Cheat Engine must find the CESDK bootstrap and your `CheatEnginePlugin` subclass in the same output assembly. The reliable pattern is to compile CESDK sources into the plugin project:
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
@@ -106,12 +33,17 @@ project uses the same pattern (adjust the relative path to `src/`):
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\src\**\*.cs" LinkBase="CESDK" />
+    <Compile Include="..\CESDK\src\**\*.cs" LinkBase="CESDK" />
   </ItemGroup>
 </Project>
 ```
 
-Then add the plugin class:
+Adjust the relative path to `CESDK/src/`. `tests/CESDK.LiveTestPlugin/CESDK.LiveTestPlugin.csproj` is the working reference project.
+
+> [!NOTE]
+> A plugin subclass in a separate assembly that only references `CESDK.dll` is not auto-discovered by the current `CEPluginInitialize` bootstrap. Use the source-link pattern for a CE-loadable plugin.
+
+### 2. Add one plugin class
 
 ```csharp
 using CESDK;
@@ -123,7 +55,7 @@ public sealed class MyCheatEnginePlugin : CheatEnginePlugin
 
     protected override void OnEnable()
     {
-        // PluginContext is initialized before this hook runs.
+        // PluginContext.Lua is initialized before this hook.
         LuaLogger.Print($"{Name} enabled");
     }
 
@@ -134,77 +66,109 @@ public sealed class MyCheatEnginePlugin : CheatEnginePlugin
 }
 ```
 
-Do not call CESDK APIs from the plugin constructor or a static initializer:
-`PluginContext.Lua` becomes available immediately before `OnEnable`. Build the project,
-copy its DLL to Cheat Engine's plugin directory, restart Cheat Engine, and enable the
-plugin in Cheat Engine's plugin settings.
+Define exactly one concrete `CheatEnginePlugin` subclass. Do not call CESDK APIs from a constructor or static initializer; shared Lua state becomes available immediately before `OnEnable`.
 
-### Open a process, resolve an address, and access memory
+### 3. Build and install
 
-Most high-level APIs are static facades in `CESDK.Classes`. Open the target by PID or
-process name before using target-memory APIs:
+```powershell
+dotnet build -p:Platform=x64
+```
+
+Copy the resulting DLL into Cheat Engine's `plugins` directory, restart Cheat Engine, then enable the plugin in CE's plugin settings.
+
+## Runtime Model
+
+CESDK is a typed layer over Cheat Engine's Lua/native plugin interfaces:
+
+```text
+Your plugin -> CESDK.Classes facade -> LuaUtils/LuaNative -> Cheat Engine
+```
+
+Important invariants:
+
+- Cheat Engine Lua state, engine objects, scanners, and UI objects are not thread-safe.
+- Marshal CE-facing work to the main GUI thread with `CESDK.Synchronize(...)`.
+- Keep an attachment check and the operation it protects inside the same synchronized block.
+- Restore the Lua stack to its original top in `finally` when using `LuaNative` directly.
+- Use 64-bit conversions for addresses, pointers, sizes, and registers.
+- Deinitialize a `FoundList` before starting another scan. Wait for scanning to finish before initializing and reading results.
+- Dispose wrappers you own. Do not destroy CE-owned objects such as the current GUI `MemScan`.
+
+## API Areas
+
+| Type | Purpose |
+| --- | --- |
+| `Process`, `ProcessControl`, `ThreadList` | Open, create, pause, resume, and inspect processes and threads |
+| `MemoryAccess`, `AdvancedMemory`, `MemoryRegions` | Typed reads/writes, allocation, protection, copy/compare, hashes, and region files |
+| `PointerChains` | Resolve pointer chains and perform bounded direct-reference scans |
+| `AobScanner`, `MemScan`, `FoundList` | AOB, value, and string scanning workflows |
+| `AddressResolver`, `SymbolManager`, `SymbolRegistry`, `SymbolWaiter` | Addresses, modules, symbols, RTTI, and registered symbols |
+| `Assembler`, `Disassembler` | Assembly, Auto Assembler, disassembly, comments, and function ranges |
+| `AddressList`, `MemoryRecord`, `CheatTable` | Cheat-table records and `.CT` load/save |
+| `StructureManager` | Global Structure Dissect definitions, elements, autoguess, and comparison |
+| `Debugger` | Interfaces, breakpoints, context, registers, stepping, threads, XMM, and LBR |
+| `Injection` | Script generation, target C compilation, DLL injection, and remote calls |
+| `Dbvm` | Optional DBVM status, physical memory, and watches |
+| `LuaExecutor`, `LuaNative`, `LuaLogger` | High-level Lua execution, stack access, callbacks, and logging |
+| `Converter`, `Speedhack` | Encoding/hash helpers and process speed control |
+
+Facade failures are wrapped in feature-specific `CesdkException` subclasses. Catch the narrow exception when recovery differs by operation.
+
+## Common Workflows
+
+### Open a process and access memory
 
 ```csharp
 using CESDK.Classes;
 
-CESDK.Classes.Process.OpenProcess("game.exe");
+global::CESDK.CESDK.Synchronize(() =>
+{
+    Process.OpenProcess("game.exe");
 
-ulong healthAddress = AddressResolver.GetAddress("game.exe+1234");
-int health = MemoryAccess.ReadInteger(healthAddress);
+    ulong address = AddressResolver.GetAddress("game.exe+1234");
+    int value = MemoryAccess.ReadInteger(address);
 
-if (!MemoryAccess.WriteInteger(healthAddress, health + 10))
-    throw new InvalidOperationException("Cheat Engine rejected the write.");
+    if (!MemoryAccess.WriteInteger(address, value + 10))
+        throw new InvalidOperationException("Cheat Engine rejected the write.");
+});
 ```
 
-`AddressResolver.GetAddress` throws when a symbol cannot be resolved.
-`GetAddressSafe` returns `null` instead:
+`AddressResolver.GetAddress` throws on failure; `GetAddressSafe` returns `null`. `MemoryAccess` provides typed target reads/writes, while methods ending in `Local` access Cheat Engine's own process.
 
-```csharp
-ulong? address = AddressResolver.GetAddressSafe("game.exe+PlayerHealth");
-if (address is not null)
-    Console.WriteLine($"Resolved to 0x{address.Value:X}");
-```
-
-`MemoryAccess` provides typed target-process reads and writes:
-`ReadByte`, `ReadSmallInteger`, `ReadInteger`, `ReadQword`, `ReadPointer`, `ReadFloat`,
-`ReadDouble`, `ReadString`, `ReadBytes`, and corresponding `Write*` methods. The
-`*Local` variants access Cheat Engine's own process rather than the opened target.
-
-### Scan for an array of bytes
-
-Use `Scan` for all matches, `ScanUnique` for a single match, or `ScanModuleUnique` to
-limit a unique scan to one module. Patterns use Cheat Engine's AOB syntax.
+### Scan for an AOB
 
 ```csharp
 using CESDK.Classes;
 
-List<ulong> matches = AobScanner.Scan("48 8B ?? ?? ?? 89");
-ulong? unique = AobScanner.ScanModuleUnique(
+List<ulong> matches = AobScanner.Scan(
+    "48 8B ?? ?? ?? 89",
+    protectionFlags: "",
+    alignmentType: 0,
+    alignmentParam: "");
+
+ulong? moduleMatch = AobScanner.ScanModuleUnique(
     "game.exe",
     "48 8B ?? ?? ?? 89");
-
-foreach (ulong match in matches)
-    LuaLogger.Printf("AOB match: 0x{0:X}", match);
 ```
 
-Optional `protectionFlags`, `alignmentType`, and `alignmentParam` arguments are passed
-through to Cheat Engine.
+AOB parameters are positional. Empty protection/alignment strings and alignment type `0` are valid values and are passed to Cheat Engine explicitly. CESDK copies returned addresses and destroys CE's temporary result list.
 
-### Run a full value scan
-
-`MemScan.GetCurrentMemScan()` wraps Cheat Engine's main scanner. `Scan` is the preferred
-entry point for it because Cheat Engine chooses first-scan versus next-scan behavior.
+### Run a value scan safely
 
 ```csharp
 using CESDK.Classes;
 
 MemScan scan = MemScan.GetCurrentMemScan();
+scan.DeinitializeResults();
 scan.NewScan();
 scan.Scan(new ScanParameters
 {
     ScanOption = ScanOption.soExactValue,
     VarType = VariableType.vtDword,
-    Input1 = "100"
+    Input1 = "100",
+    Input2 = string.Empty,
+    AlignmentType = AlignmentType.fsmAligned,
+    AlignmentParam = "4"
 });
 scan.WaitTillDone();
 scan.InitializeResults();
@@ -213,11 +177,7 @@ try
 {
     int count = scan.GetResultCount();
     if (count > 0)
-    {
-        string firstAddress = scan.GetResultAddress(0);
-        string firstValue = scan.GetResultValue(0);
-        LuaLogger.Printf("First of {0} results: {1} = {2}", count, firstAddress, firstValue);
-    }
+        LuaLogger.Printf("First result: {0}", scan.GetResultAddress(0));
 }
 finally
 {
@@ -225,22 +185,16 @@ finally
 }
 ```
 
-Always call `DeinitializeResults()` before starting another scan. An initialized
-`FoundList` holds pointers into the previous result set; scanning again with those stale
-pointers can crash Cheat Engine. For a separately owned scanner, construct `new MemScan()`
-and use `FirstScan`/`NextScan` when explicit control is required.
+Call `DeinitializeResults()` before every subsequent scan. An initialized `FoundList` points into the prior result set; rescanning with it attached can crash Cheat Engine.
 
-### Work with the address list on the GUI thread
-
-Cheat Engine UI objects, including the main address list, should be accessed through
-`CESDK.Synchronize`:
+### Work with the address list
 
 ```csharp
 using CESDK.Classes;
 
 global::CESDK.CESDK.Synchronize(() =>
 {
-    var addressList = new AddressList();
+    using var addressList = new AddressList();
     MemoryRecord record = addressList.CreateMemoryRecord();
     record.Description = "Player health";
     record.Address = "game.exe+1234";
@@ -248,21 +202,16 @@ global::CESDK.CESDK.Synchronize(() =>
 });
 ```
 
-The generic overload returns a result:
+The generic synchronization overload can return a value:
 
 ```csharp
-int recordCount = global::CESDK.CESDK.Synchronize(
+int count = global::CESDK.CESDK.Synchronize(
     () => new AddressList().Count);
 ```
 
 ### Execute Lua
 
-#### High-level execution
-
-`LuaExecutor.Execute` is the simplest way to run Lua and convert returned values to C#.
-Lua `nil`, booleans, numbers, strings, and tables become managed values; multiple returns
-are stored in `Values`. Nested table conversion is limited to 5 levels and 100 entries
-per table.
+`LuaExecutor.Execute` converts Lua `nil`, booleans, numbers, strings, tables, and multiple returns into managed values:
 
 ```csharp
 using CESDK.Classes;
@@ -270,59 +219,40 @@ using CESDK.Classes;
 LuaResult result = LuaExecutor.Execute(
     "return getOpenedProcessID(), 'ready', { 10, 20, 30 }");
 
-if (result.ReturnCount == 1)
-    Console.WriteLine(result.Value);
-else if (result.Values is not null)
+if (result.Values is not null)
+{
     foreach (object? value in result.Values)
         Console.WriteLine(value);
-```
-
-`LuaExecutor` restores the values it reads from the Lua stack and wraps execution failures
-in `LuaExecutorException`.
-
-#### Manual stack API
-
-For Lua functions not covered by a facade, use `PluginContext.Lua`. The API follows the
-Lua C stack model: push the function and arguments, call `PCall`, read return values, and
-restore the original stack top in `finally`.
-
-```csharp
-using CESDK;
-using CESDK.Lua;
-
-static int GetOpenedProcessIdManually()
-{
-    LuaNative lua = PluginContext.Lua;
-    int initialTop = lua.GetTop();
-
-    try
-    {
-        lua.GetGlobal("getOpenedProcessID");
-        if (!lua.IsFunction(-1))
-            throw new InvalidOperationException("getOpenedProcessID is unavailable.");
-
-        int status = lua.PCall(0, 1);
-        if (status != 0)
-            throw new InvalidOperationException(lua.ToString(-1));
-
-        return lua.ToInteger(-1);
-    }
-    finally
-    {
-        lua.SetTop(initialTop);
-    }
 }
 ```
 
-`LuaNative.DoString` is a lower-level alternative to `LuaExecutor`. It leaves every Lua
-return value on the stack, so callers must read or discard those values and restore stack
-balance themselves.
+Use `PluginContext.Lua` only when no typed facade fits. Manual stack code must preserve stack balance:
 
-### Register C# functions in Cheat Engine Lua
+```csharp
+LuaNative lua = PluginContext.Lua;
+int initialTop = lua.GetTop();
 
-Register callbacks during `OnEnable`, after `PluginContext` has been initialized.
-`RegisterCEFunction` is preferred for Cheat Engine plugins. Callback arguments are at
-Lua stack indices `1..N`; push each return value and return the number of values pushed.
+try
+{
+    lua.GetGlobal("getOpenedProcessID");
+    if (!lua.IsFunction(-1))
+        throw new InvalidOperationException("getOpenedProcessID is unavailable.");
+
+    int status = lua.PCall(0, 1);
+    if (status != 0)
+        throw new InvalidOperationException(lua.ToString(-1));
+
+    int processId = lua.ToInteger(-1);
+}
+finally
+{
+    lua.SetTop(initialTop);
+}
+```
+
+### Register a C# Lua callback
+
+Register callbacks from `OnEnable`, after `PluginContext` is initialized:
 
 ```csharp
 protected override void OnEnable()
@@ -336,37 +266,83 @@ protected override void OnEnable()
         lua.PushInteger(left + right);
         return 1;
     });
-
-    LuaLogger.Print("Call my_plugin_add(2, 3) from Cheat Engine Lua.");
-}
-
-protected override void OnDisable()
-{
-    PluginContext.Lua.DoString("my_plugin_add = nil");
 }
 ```
 
-`RegisterFunction(name, Action)` is available for a parameterless, no-return managed
-callback using the standard Lua API. `RegisterCEFunction` uses Cheat Engine's
-`LuaRegister`, keeps the delegate alive, accepts arguments, and can return values.
+Remove exported callbacks in `OnDisable` if the plugin may be toggled without restarting CE.
 
-### Other API areas
+## Build and Test
 
-| Type | Common operations |
+### Build the SDK
+
+```powershell
+dotnet restore
+dotnet build CESDK.sln
+```
+
+Normal tests do not require Cheat Engine:
+
+```powershell
+dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj -p:Platform=x64 --filter "TestCategory!=Live"
+```
+
+### Run the CE-loaded live suite
+
+1. Build `tests/CESDK.LiveTestPlugin/CESDK.LiveTestPlugin.csproj` for x64.
+2. Load its `cesdk-live-tests.dll` in Cheat Engine and enable **CESDK Live Tests**.
+3. Startup executes target-independent cases. Target-dependent cases are reported as skipped until a process is attached.
+4. Attach a disposable process.
+5. Choose **CESDK Tests** -> **Run Tests Against Attached Process**.
+6. Validate `%TEMP%\cesdk-live-tests-result.json`:
+
+```powershell
+$env:CESDK_LIVE = "1"
+dotnet test tests/CESDK.LiveTests/CESDK.LiveTests.csproj `
+  -p:Platform=x64 `
+  --filter TestCategory=Live
+```
+
+Enable mutating coverage before launching Cheat Engine:
+
+```powershell
+$env:CESDK_LIVE_MUTATING = "1"
+& "C:\Program Files\Cheat Engine\cheatengine-x86_64.exe"
+```
+
+Then attach a disposable target and use the **CESDK Tests** menu. Mutating coverage allocates and writes target memory and temporarily changes address-list, structure, symbol, and table state.
+
+Optional environment variables:
+
+| Variable | Purpose |
 | --- | --- |
-| `Assembler` | `Assemble`, `AutoAssemble`, `AutoAssembleCheck`, `SetAssemblerMode` |
-| `Disassembler` | `Disassemble`, `GetInstructionSize`, `GetFunctionRange`, comments |
-| `Debugger` | attach/detach, pause/resume, breakpoints, register access |
-| `SymbolManager` / `SymbolWaiter` | modules, symbols, pointer size, synchronous or cancellable symbol waits |
-| `MemoryRegions` | enumerate regions, inspect protection, grant full access |
-| `AddressList` / `MemoryRecord` | create, find, update, select, freeze, and delete cheat-table records |
-| `Speedhack` | `SetSpeed`, `GetSpeed` |
-| `Converter` | MD5 and ANSI/UTF-8 conversion |
-| `LuaLogger` | `Print`, `Printf`, severity helpers, and non-throwing `TryPrint` |
+| `CESDK_LIVE` | Enables the external MSTest report validator |
+| `CESDK_LIVE_MUTATING` | Enables target and CE-state mutations in the plugin suite |
+| `CESDK_LIVE_TARGET_PID` | Automatically attaches a disposable PID at plugin startup |
+| `CESDK_LIVE_RESULT` | Overrides the JSON report path |
+| `CESDK_LIVE_TIMEOUT_SECONDS` | Overrides report polling timeout |
+| `CESDK_LIVE_MAX_RESULT_AGE_SECONDS` | Overrides accepted report age |
 
-Facade failures are normally wrapped in a feature-specific `CesdkException` subtype
-(`MemoryAccessException`, `AobScanException`, `AddressResolutionException`, and so on).
-Catch the narrow exception when recovery differs by operation.
+The attached Notepad validation currently exercises 34 CESDK cases with no skipped cases.
+
+## Logging
+
+CESDK uses an isolated NLog factory. CESDK and ce-mcp share one canonical file:
+
+```text
+%APPDATA%\CeMCP\ce-mcp.log
+```
+
+The log rolls at 10 MiB and retains five archives. Do not add alternate file loggers.
+
+## NuGet Package
+
+The API package is published at [NuGet.org](https://www.nuget.org/packages/CESDK):
+
+```powershell
+dotnet add package CESDK
+```
+
+The package is useful when CESDK bootstrap code already exists in the loadable assembly. For a new Cheat Engine plugin, use the source-link bootstrap pattern described in Quick Start.
 
 ## Contributors
 
@@ -378,4 +354,4 @@ Made with [contrib.rocks](https://contrib.rocks).
 
 ## License
 
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FShadowNineX%2FCESDK.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FShadowNineX%2FCESDK?ref=badge_large)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FShadowNineX%2FCESDK.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com/ShadowNineX%2FCESDK?ref=badge_large)
